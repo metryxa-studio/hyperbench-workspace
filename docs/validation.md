@@ -9,6 +9,7 @@ Release checks for 0.1.0, run on 17 October 2026. These results describe the che
 | Chromium workflows | 8 tests pass, including a 390 px layout. |
 | Production build | CLI/server bundle and browser assets build successfully. |
 | Fresh package | Install, doctor, skill copying, browser API, MCP reads and explicit draft acceptance pass from a temporary directory containing spaces. |
+| npm release | Registry installation of `hyperbench-workspace@0.1.0` passes the package checks on Node 22 and Node 26. A global install by the short name also launches the `hyperbench` executable successfully. The published archive matches the tested GitHub release. |
 | Dependency audit | No known vulnerabilities reported by `npm audit --omit=dev` at check time. |
 | Skill format | All three `SKILL.md` files pass the skill format validator. |
 
@@ -46,6 +47,7 @@ npx playwright install chromium
 npm run test:ui
 npm pack
 node scripts/verify-package.mjs hyperbench-workspace-0.1.0.tgz
+node scripts/verify-package.mjs --registry hyperbench-workspace@0.1.0
 ```
 
 The package check installs into a temporary folder and removes it afterward. It requires package-registry access. The GitHub workflow also runs the backend matrix on Linux, macOS and Windows with Node 22/24, plus Chromium on Linux; consult that run for platform results.

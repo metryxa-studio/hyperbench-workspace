@@ -26,6 +26,7 @@ try {
       root,
       packageSpec,
       "--registry=https://registry.npmjs.org",
+      "--prefer-online",
     ],
     { stdio: "pipe", shell: process.platform === "win32" },
   );
