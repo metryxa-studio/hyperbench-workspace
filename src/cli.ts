@@ -39,7 +39,7 @@ export function connectionSettings(
     ...(projectId ? ["--project", projectId] : []),
   ];
   if (client === "codex")
-    return `[mcp_servers.hyperbench]\ncommand = ${JSON.stringify(process.execPath)}\nargs = ${JSON.stringify(args)}\n`;
+    return `[mcp_servers.hyperbench]\ncommand = ${JSON.stringify(process.execPath)}\nargs = ${JSON.stringify(args)}\nenv_vars = ["SSH_AUTH_SOCK"]\ntool_timeout_sec = 330\n`;
   if (client === "claude")
     return `claude mcp add --transport stdio --scope user hyperbench -- ${[process.execPath, ...args].map(q).join(" ")}\n`;
   if (!["cursor", "gemini", "generic"].includes(client))

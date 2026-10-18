@@ -35,7 +35,8 @@ export type IconName =
   | "settings"
   | "eye"
   | "draft"
-  | "globe";
+  | "globe"
+  | "terminal";
 const paths: Record<IconName, ReactNode> = {
   plus: <path d="M12 5v14M5 12h14" />,
   close: <path d="m6 6 12 12M18 6 6 18" />,
@@ -153,6 +154,12 @@ const paths: Record<IconName, ReactNode> = {
     <>
       <circle cx="12" cy="12" r="9" />
       <path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z" />
+    </>
+  ),
+  terminal: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="m7 9 3 3-3 3m6 0h4" />
     </>
   ),
 };

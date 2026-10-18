@@ -123,6 +123,43 @@ test("RPC validates requests and uses same-origin auth without query tokens", as
     await s.cleanup();
   }
 });
+test("bench management and execution require authenticated same-origin requests", async () => {
+  const s = await fixture();
+  try {
+    const operations = ["list", "add", "update", "remove", "test", "execute"];
+    for (const operation of operations) {
+      const method = `benches.${operation}`;
+      const args = {
+        projectId: "project",
+        benchId: "bench",
+        command: "printf safe",
+      };
+      const body = JSON.stringify({ method, args });
+      const unauthenticated = await fetch(s.origin + "/api/call", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+      assert.equal(unauthenticated.status, 401);
+      const foreign = await fetch(s.origin + "/api/call", {
+        method: "POST",
+        headers: { ...s.headers, Origin: "https://evil.invalid" },
+        body,
+      });
+      assert.equal(foreign.status, 403);
+      assert.equal(s.calls.length, operations.indexOf(operation));
+      const accepted = await fetch(s.origin + "/api/call", {
+        method: "POST",
+        headers: { ...s.headers, Origin: s.origin },
+        body,
+      });
+      assert.equal(accepted.status, 200);
+      assert.deepEqual(s.calls.at(-1), { method, args });
+    }
+  } finally {
+    await s.cleanup();
+  }
+});
 test("original documents download as attachments and cannot execute HTML", async () => {
   const s = await fixture();
   try {

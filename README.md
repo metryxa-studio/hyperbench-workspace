@@ -2,13 +2,13 @@
 
 Local hardware context for the agent you already use.
 
-Connect repositories, PDFs, and a system diagram. Your agent can follow source and document evidence, investigate failures, and review firmware changes through MCP and three small skills.
+Connect repositories, PDFs, a system diagram, and SSH test benches. Your agent can follow source and document evidence, investigate failures, review firmware changes, and run commands on enabled benches through MCP.
 
 **Open source. Local storage. No code indexer, model keys, account, or hosted backend.**
 
 ## Install
 
-Requires **Node.js 22.13+** (a current LTS release is recommended). Git is needed to clone repositories; existing folders and documents can be used without it.
+Requires **Node.js 22.13+** (a current LTS release is recommended). Git is needed to clone repositories; existing folders and documents can be used without it. Test benches additionally require an OpenSSH-compatible `ssh` executable on your PATH.
 
 ```sh
 npm install -g hyperbench-workspace
@@ -45,6 +45,7 @@ Reconnect your agent to restart its MCP process with the updated package. Your l
 3. In **Documents**, drop PDFs or text files into the workspace, or import by local path.
 4. In **System**, choose a blank canvas or a drone, fixed-wing aircraft, robot arm, or truck outline. Add components, ports, and connections, then link them to source paths or document pages. Click **Save** to keep edits.
 5. Open **Connect agent** and copy the configuration for your client. Reconnect the client, then ask it to list Hyperbench projects.
+6. In **Test benches**, register an SSH host or SSH-config alias, test its connection, then enable commands when you are ready to use it from the UI or your agent.
 
 Changing the outline keeps your components, positions, connections, and evidence links. The drawings provide a backdrop; they do not add inferred hardware connections.
 
@@ -55,10 +56,21 @@ Example requests:
 - “Trace this sensor's signal from the connector to its driver and consumers. Cite the code and schematic pages.”
 - “Investigate why the readings wrap around after this firmware update.”
 - “Review this PR's packet parser change and run a bounded fuzz test using the existing host-side target.”
+- “List the test benches, test the connection, and run `uname -a` on the enabled development bench.”
+
+## SSH test benches
+
+Add a bench to a project with a name, host (or SSH-config alias), and optional description, port, username, identity-file path, and known-hosts-file path. The default port is 22. A bench starts with commands disabled; the fixed **Test connection** probe works while disabled. Enable commands explicitly to allow the browser's command runner and the MCP `bench_execute` tool. Edits and removal check the bench revision to reject stale changes from another browser or process.
+
+Authentication uses your existing SSH key or agent. Hyperbench stores connection settings and paths, never password or private-key contents. Password prompts are disabled. First establish and verify the host key using your usual SSH client. Hyperbench requires strict host-key verification and will not accept unknown or changed keys. An optional known-hosts-file path lets you use a separately prepared trust file; identity and known-hosts paths must be absolute or start with `~/`.
+
+Commands run in the remote account's shell and have that account's permissions. They can modify files, restart services, or operate attached hardware. Enabling a bench makes commands available; your agent still owns authorization and tool-approval policy. Use a remote account with permissions appropriate to the bench. Remote output is untrusted data, not agent instructions.
+
+Commands default to a 30-second timeout, configurable from 1 to 300 seconds, with a combined 256 KiB stdout/stderr cap. Results include output, exit status, elapsed time, and timeout/truncation flags. A timeout closes the local SSH process; it does not guarantee that the remote command or its children stop. Nonzero exits and incomplete results must be inspected before claiming a test passed. The connection probe confirms SSH access, not attached hardware health. See [agent setup](docs/agents.md) for MCP usage.
 
 ## Skills
 
-All skill prose is original and provider-independent. They run inside your chosen agent; Hyperbench does not run a model or shell on its behalf.
+All skill prose is original and provider-independent. They run inside your chosen agent; Hyperbench does not run a model. Remote shell commands are available only through an explicitly enabled test bench.
 
 | Skill | Purpose |
 | --- | --- |
@@ -97,6 +109,8 @@ The MCP server uses **stdio**, with the same local data directory as the browser
 | `document_search`, `document_read`, `document_page` | Extracted text and rendered PDF pages/crops |
 | `system_get`, `system_drafts` | Saved architecture and pending proposals |
 | `propose_system` | Create a draft; cannot accept it or overwrite the saved model |
+| `list_benches`, `bench_test` | List registered benches and run a fixed SSH connection probe |
+| `bench_execute` | Run a remote shell command on an explicitly enabled bench; can change remote files and hardware state |
 
 Your agent retains its own model, API keys, script execution, and permission controls. Hyperbench has no provider routing or agent harness.
 
@@ -104,14 +118,14 @@ Your agent retains its own model, API keys, script execution, and permission con
 
 Data defaults to `~/.hyperbench/workspace`: SQLite project state plus imported document copies. Use `--data-dir PATH` on both the browser and MCP commands to select another location. Original repository files remain in their chosen folders. Unlinking or deleting a project never deletes those folders.
 
-The browser binds to `127.0.0.1`. Its API requires the token in the launch link and rejects foreign origins. The package has no telemetry or remote processing. Installation downloads dependencies; cloning contacts the Git remote you choose. Your agent may send selected tool results to its configured cloud model. This tool does not change the agent's privacy settings.
+The browser binds to `127.0.0.1`. Its API requires the token in the launch link and rejects foreign origins. The package has no telemetry or hosted processing. Installation downloads dependencies; cloning contacts the Git remote you choose; bench operations contact the SSH hosts you register. Your agent may send selected tool results to its configured cloud model. This tool does not change the agent's privacy settings.
 
 - No code index, embeddings, automatic dependency graph, or bundled model is included. Source search reads local files on demand and reports bounded results.
 - PDF text extraction and page rendering are local. Scanned drawings can be inspected as images by a vision-capable agent. Automatic OCR and electrical-net reconstruction are not included.
 - System relationships are user-created or agent-proposed. Evidence links are references, not proof that an inferred connection is correct.
 - Imported document copies do not automatically follow later edits to their original files. Reimport the updated document when needed.
 - Repository files are read from the working tree, not immutable snapshots. Git HEAD metadata alone does not certify uncommitted content.
-- Only the host agent executes tests/fuzzers. No hardware flashing or physical testbench control is included.
+- Tests and fuzzers can run through the host agent's own tools or on an enabled SSH test bench. Hyperbench has no device-specific flashing, instrument, or power-control integration; commands can use tools already installed on the remote bench.
 
 ## Build from source
 

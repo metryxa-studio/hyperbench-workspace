@@ -5,7 +5,7 @@ import path from "node:path";
 import { Workspace } from "../src/core/workspace";
 import { startBrowserServer } from "../src/server";
 import { pdfFixture } from "./pdf-fixture";
-import type { SystemModel } from "../src/types";
+import type { SystemModel, TestBench } from "../src/types";
 let directory: string,
   workspace: Workspace,
   local: Awaited<ReturnType<typeof startBrowserServer>>;
@@ -1295,4 +1295,145 @@ test("outline artwork does not block panning or dragging connected components", 
   expect(saved.components[1]).toEqual(original.components[1]);
   expect(saved.connections).toEqual(original.connections);
   expect(saved.links).toEqual(original.links);
+});
+
+test("test benches can be connected, enabled as tools, edited, and removed", async ({ page }, testInfo) => {
+  await createProject(page);
+  const requests: { method: string; args: Record<string, unknown> }[] = [];
+  await page.route("**/api/call", async (route) => {
+    const request = route.request().postDataJSON();
+    if (!["benches.test", "benches.execute"].includes(request?.method)) {
+      await route.continue();
+      return;
+    }
+    requests.push(request);
+    await route.fulfill({
+      json: {
+        result: {
+          benchId: request.args.benchId,
+          command: request.args.command || "printf 'Hyperbench SSH connection OK'",
+          stdout: request.args.command === "big-output" ? "x".repeat(34_000) : request.method === "benches.test" ? "Hyperbench SSH connection OK\nLinux\n" : "<script>not executable markup</script>\nBench ready\n",
+          stderr: "",
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          truncated: request.args.command === "big-output",
+          durationMs: 125,
+        },
+      },
+    });
+  });
+  await page.getByRole("button", { name: /^Test benches/ }).click();
+  await expect(page.getByRole("heading", { name: "Bring your test bench into the workspace" })).toBeVisible();
+  await page.getByRole("button", { name: "Add your first test bench" }).click();
+  await page.getByLabel("Bench name").fill("Motor bench");
+  await page.getByLabel("Description (optional)").fill("Motor controller and UART loopback");
+  await page.getByLabel("SSH host or config alias").fill("lab-bench");
+  await expect(page.getByLabel("Port", { exact: true })).toHaveValue("22");
+  await page.getByLabel("SSH username (optional)").fill("tester");
+  await page.getByText("SSH key and host verification", { exact: true }).click();
+  await page.getByLabel("Identity file (optional)").fill("~/.ssh/bench_ed25519");
+  await page.getByLabel("Known hosts file (optional)").fill("~/.ssh/bench_known_hosts");
+  const enable = page.getByRole("checkbox", { name: /^Enable remote commands for this bench/ });
+  await expect(enable).not.toBeChecked();
+  await page.getByRole("dialog").getByRole("button", { name: "Add test bench", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Motor bench", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Test benches/ })).toContainText("1");
+  await expect(page.getByRole("button", { name: "Run command", exact: true })).toBeDisabled();
+  await expect(page.getByLabel("Shell command", { exact: true })).toBeDisabled();
+  const added = (await workspace.call("benches.list", { projectId })) as TestBench[];
+  expect(added).toHaveLength(1);
+  expect(added[0]).toMatchObject({ name: "Motor bench", host: "lab-bench", port: 22, username: "tester", enabled: false });
+  expect(added[0].knownHostsFile).toMatch(/\/\.ssh\/bench_known_hosts$/);
+  await page.getByRole("button", { name: "Test connection", exact: true }).click();
+  await expect(page.getByText("Connection successful", { exact: true })).toBeVisible();
+  expect(requests[0].method).toBe("benches.test");
+  await expect(page.getByRole("button", { name: "Run command", exact: true })).toBeDisabled();
+
+  await page.getByRole("button", { name: "Edit bench", exact: true }).click();
+  await expect(page.getByLabel("SSH host or config alias")).toHaveValue("lab-bench");
+  await page.getByLabel("Port", { exact: true }).fill("2222");
+  await enable.check();
+  await page.getByRole("button", { name: "Save bench", exact: true }).click();
+  await expect(page.getByText("Available to your agent", { exact: true })).toBeVisible();
+  await page.getByLabel("Shell command", { exact: true }).fill("printf 'Bench ready\\n'");
+  await page.getByLabel("Timeout (seconds)").fill("12");
+  await page.getByRole("button", { name: "Run command", exact: true }).click();
+  await expect(page.getByText("Command completed", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Standard output", { exact: true })).toContainText("<script>not executable markup</script>");
+  expect(requests[1]).toEqual({ method: "benches.execute", args: { projectId, benchId: added[0].id, command: "printf 'Bench ready\\n'", timeoutSeconds: 12 } });
+  await expect(page.locator(".bench-result-heading")).toContainText("Exit 0");
+  await page.screenshot({ path: testInfo.outputPath("test-bench-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByLabel("Shell command", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("test-bench-mobile.png") });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByLabel("Shell command", { exact: true }).fill("big-output");
+  await page.getByRole("button", { name: "Run command", exact: true }).click();
+  await expect(page.getByText("Output limit reached", { exact: true })).toBeVisible();
+  await expect(page.getByText("Command completed", { exact: true })).toHaveCount(0);
+  expect((await page.getByLabel("Standard output", { exact: true }).textContent())?.length).toBe(32_000);
+  await expect(page.getByText("Output was shortened to keep this result manageable.")).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: /^Test benches/ }).click();
+  await expect(page.getByRole("heading", { name: "Motor bench", exact: true })).toBeVisible();
+  await expect(page.getByText("Available to your agent", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Edit bench", exact: true }).click();
+  await expect(page.getByLabel("Port", { exact: true })).toHaveValue("2222");
+  await enable.uncheck();
+  await page.getByRole("button", { name: "Save bench", exact: true }).click();
+  await expect(page.getByLabel("Shell command", { exact: true })).toBeDisabled();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Bring your test bench into the workspace" })).toBeVisible();
+  expect(await workspace.call("benches.list", { projectId })).toEqual([]);
+});
+
+test("a remote command result stays with its project when switching projects", async ({ page }) => {
+  await createProject(page);
+  const oldProjectId = projectId;
+  const bench = await workspace.call("benches.add", { projectId, name: "Old project bench", host: "lab-bench", enabled: true }) as TestBench;
+  await workspace.call("projects.create", { name: "New hardware project" });
+  await page.reload();
+  await page.getByRole("button", { name: /^Test benches/ }).click();
+  await expect(page.getByRole("heading", { name: "Old project bench", exact: true })).toBeVisible();
+  let release!: () => void;
+  let notifyHeld!: () => void;
+  const held = new Promise<void>((resolve) => { notifyHeld = resolve; });
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/call", async (route) => {
+    const request = route.request().postDataJSON();
+    if (request?.method !== "benches.execute") {
+      await route.continue();
+      return;
+    }
+    expect(request.args.projectId).toBe(oldProjectId);
+    notifyHeld();
+    await released;
+    await route.fulfill({ json: { result: { benchId: bench.id, command: "uname -a", stdout: "Previous project output", stderr: "", exitCode: 0, signal: null, timedOut: false, truncated: false, durationMs: 100 } } });
+  });
+  try {
+    await page.getByLabel("Shell command", { exact: true }).fill("uname -a");
+    await page.getByRole("button", { name: "Run command", exact: true }).click();
+    await held;
+    await expect(page.getByText("Waiting for the remote command…", { exact: false })).toBeVisible();
+    await page.locator(".project-switcher").click();
+    await page.getByRole("dialog").getByRole("button", { name: /^N New hardware project/ }).click();
+    await expect(page.getByRole("heading", { name: "Bring your test bench into the workspace" })).toBeVisible();
+    const delivered = page.waitForResponse((response) => response.request().postDataJSON()?.method === "benches.execute");
+    release();
+    await delivered;
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await expect(page.getByText("Previous project output", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Command completed", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Test benches/ })).toContainText("—");
+    await page.locator(".project-switcher").click();
+    await page.getByRole("dialog").getByRole("button", { name: /^F Flight controller/ }).click();
+    await expect(page.getByRole("heading", { name: "Old project bench", exact: true })).toBeVisible();
+    await expect(page.getByLabel("Shell command", { exact: true })).toHaveValue("");
+    await expect(page.getByText("Previous project output", { exact: true })).toHaveCount(0);
+  } finally {
+    release();
+  }
 });

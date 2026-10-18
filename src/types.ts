@@ -14,6 +14,32 @@ export interface Repository {
   branch?: string;
   createdAt: string;
 }
+export interface TestBench {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string;
+  host: string;
+  port: number;
+  username?: string;
+  identityFile?: string;
+  knownHostsFile?: string;
+  enabled: boolean;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface BenchCommandResult {
+  benchId: string;
+  command: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  signal: string | null;
+  timedOut: boolean;
+  truncated: boolean;
+  durationMs: number;
+}
 export interface DocumentSummary {
   id: string;
   projectId: string;

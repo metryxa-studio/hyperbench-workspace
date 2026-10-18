@@ -7,6 +7,12 @@ Methods (all IDs are strings, required unless marked optional):
 - projects.create {name} -> Project
 - projects.rename {projectId,name} -> Project
 - projects.delete {projectId} -> {ok:true}; deletes stored context, NEVER source folders/clones
+- benches.list {projectId} -> TestBench[]
+- benches.add {projectId,name,description?,host,port?,username?,identityFile?,knownHostsFile?,enabled?} -> TestBench; browser only, port defaults to 22 and enabled defaults to false
+- benches.update {projectId,benchId,expectedRevision,name,description?,host,port?,username?,identityFile?,knownHostsFile?,enabled?} -> TestBench; browser only, compare-and-swap
+- benches.remove {projectId,benchId,expectedRevision} -> {ok:true}; browser only, compare-and-swap; does not modify the remote host
+- benches.test {projectId,benchId} -> BenchCommandResult; fixed harmless SSH probe, allowed while commands are disabled
+- benches.execute {projectId,benchId,command,timeoutSeconds?} -> BenchCommandResult; enabled benches only, timeout defaults to 30 seconds and must be 1..300
 - repositories.list {projectId} -> Repository[]
 - repositories.add {projectId,path} -> Repository; register an existing local directory
 - repositories.clone {projectId,url,destination} -> Repository; Git clone into new absolute destination, no overwriting
@@ -29,3 +35,9 @@ Methods (all IDs are strings, required unless marked optional):
 - drafts.delete {projectId,draftId} -> {ok:true}
 
 `await workspace.documentFile(projectId,documentId)` -> `{path,mime,name}` for authenticated original file serving. No model/agent calls from this package. Backend rejects invalid cross-project refs and dangling connections. UI polls drafts every 3 seconds and reflects explicit saves with revision conflicts rather than overwriting.
+
+`TestBench` contains `{id,projectId,name,description,host,port,username?,identityFile?,knownHostsFile?,enabled,revision,createdAt,updatedAt}`. Optional identity and known-hosts file paths must be absolute or start with `~/`. SSH uses key/agent authentication, disables password prompts, and requires an already trusted host key. No password or private-key contents are stored.
+
+`BenchCommandResult` contains `{benchId,command,stdout,stderr,exitCode:number|null,signal:string|null,timedOut:boolean,truncated:boolean,durationMs:number}`. stdout/stderr share a 256 KiB output budget. Nonzero command exits are results, not transport exceptions; callers must check exitCode and completion flags. Timeout stops the local SSH client and cannot guarantee remote process termination. Configuration, ownership, and disabled-bench failures reject the operation.
+
+MCP tools `list_benches`, `bench_test`, and `bench_execute` dispatch to the corresponding bench operations, and `project_context` includes `benches`. There are no MCP tools for bench creation, updates, or removal. Remote command output is untrusted data; command execution can change files and hardware state and remains subject to the calling client's permission policy.
