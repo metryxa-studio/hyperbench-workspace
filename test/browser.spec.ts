@@ -204,7 +204,7 @@ async function seedMixedSystem(page: any) {
     },
   })) as SystemModel;
   await page.reload();
-  await expect(page.locator(".canvas-node")).toHaveCount(3);
+  await expect(page.locator(".canvas-node")).toHaveCount(1);
   return saved;
 }
 
@@ -363,6 +363,12 @@ test("an external agent draft is visible for review and only explicit acceptance
     "Add temperature sensor",
   );
   await page.getByRole("button", { name: "Review on canvas" }).click();
+  const proposedSensor = page.getByRole("button", {
+    name: "Temperature sensor, hardware component",
+    exact: true,
+  });
+  await expect(proposedSensor).toBeVisible();
+  await proposedSensor.click();
   await expect(
     page.getByText("Temperature sensor", { exact: true }).first(),
   ).toBeVisible();
@@ -933,7 +939,6 @@ test("component views fit their own nodes, hide unrelated selections and preserv
   const modes = [
     ["Hardware", "Controller, hardware component"],
     ["Software", "Firmware, software component"],
-    ["External", "Simulator, external component"],
   ];
   for (const [mode, name] of modes) {
     const button = page.getByRole("button", { name: new RegExp(`^${mode}`) });
@@ -941,6 +946,8 @@ test("component views fit their own nodes, hide unrelated selections and preserv
     await expect(button).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator(".canvas-node")).toHaveCount(1);
     await expectNodeInsideCanvas(page, name);
+    await expect(page.locator(".canvas-node .node-top")).toBeVisible();
+    await expect(page.locator(".canvas-node .node-footer")).toBeVisible();
     await expect(page.locator(".device-outline")).toHaveCount(0);
     await expect(
       page.getByLabel("Device outline", { exact: true }),
@@ -954,12 +961,87 @@ test("component views fit their own nodes, hide unrelated selections and preserv
     ).toBeDisabled();
   }
   await page.getByRole("button", { name: /^Diagram/ }).click();
-  await expect(page.locator(".canvas-node")).toHaveCount(3);
-  await expect(page.locator(".canvas-connection")).toHaveCount(1);
+  await expect(page.locator(".canvas-node")).toHaveCount(1);
+  await expect(page.locator(".canvas-connection")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^External/ })).toHaveCount(0);
   await expect(page.getByLabel("Device outline", { exact: true })).toHaveValue(
     "truck",
   );
   expect(await workspace.call("system.get", { projectId })).toEqual(original);
+});
+
+test("Diagram shows compact hardware symbols while preserving hidden software, legacy types and connections", async ({
+  page,
+}) => {
+  const original = await seedMixedSystem(page);
+  await expect(page.getByRole("button", { name: /^External/ })).toHaveCount(0);
+  const node = page.getByRole("button", {
+    name: "Controller, hardware component",
+    exact: true,
+  });
+  await expect(node).toHaveClass(/diagram-node/);
+  await expect(node).toHaveText("Controller");
+  await expect(node.locator(".node-top, .node-footer, .node-port")).toHaveCount(
+    0,
+  );
+  const symbol = node.locator(".diagram-symbol");
+  await expect(symbol).toBeVisible();
+  await expect(node.locator(".diagram-label")).toBeHidden();
+  await node.focus();
+  await expect(node.locator(".diagram-label")).toBeVisible();
+  const size = await symbol.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      width: parseFloat(style.width),
+      height: parseFloat(style.height),
+    };
+  });
+  expect(size.width).toBeGreaterThan(0);
+  expect(size.height).toBeGreaterThan(0);
+  expect(size.width).toBeLessThanOrEqual(40);
+  expect(size.height).toBeLessThanOrEqual(40);
+  await expect(symbol.locator("svg")).toHaveAttribute("width", "22");
+  await expect(
+    page.locator(".canvas-node.software, .canvas-node.external"),
+  ).toHaveCount(0);
+  await expect(page.locator(".canvas-connection")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  const connectDialog = page.getByRole("dialog");
+  await expect(connectDialog.getByLabel("From", { exact: true })).toHaveValue(
+    "controller",
+  );
+  await expect(connectDialog.getByLabel("To", { exact: true })).toHaveValue(
+    "firmware",
+  );
+  await expect(
+    connectDialog.getByLabel("To", { exact: true }).locator("option"),
+  ).toHaveText(["Controller", "Firmware"]);
+  await connectDialog
+    .getByRole("button", { name: "Cancel", exact: true })
+    .click();
+
+  await page
+    .getByLabel("Device outline", { exact: true })
+    .selectOption("quadrotor");
+  await save(page);
+  await page.reload();
+  await expect(page.locator(".diagram-node")).toHaveCount(1);
+  await expect(
+    page.locator(".canvas-node.software, .canvas-node.external"),
+  ).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^External/ })).toHaveCount(0);
+  const saved = (await workspace.call("system.get", {
+    projectId,
+  })) as SystemModel;
+  expect(saved.layout).toBe("quadrotor");
+  expect(saved.components).toEqual(original.components);
+  expect(saved.connections).toEqual(original.connections);
+  expect(saved.links).toEqual(original.links);
+  await page.getByRole("button", { name: /^Software/ }).click();
+  await expectNodeInsideCanvas(page, "Firmware, software component");
+  await expect(page.locator(".canvas-node .node-top")).toBeVisible();
+  await expect(page.locator(".canvas-node .node-footer")).toBeVisible();
 });
 
 test("empty hardware and software views replace an outline with a clear type-specific empty state", async ({
@@ -971,7 +1053,7 @@ test("empty hardware and software views replace an outline with a clear type-spe
     .selectOption("quadrotor");
   await save(page);
   const original = await workspace.call("system.get", { projectId });
-  for (const kind of ["hardware", "software", "external"]) {
+  for (const kind of ["hardware", "software"]) {
     await page
       .getByRole("button", { name: new RegExp(`^${kind}`, "i") })
       .click();
@@ -1013,6 +1095,9 @@ test("adding components defaults to the active view and reveals an explicitly di
   await expect(dialog.getByLabel("Type", { exact: true })).toHaveValue(
     "software",
   );
+  await expect(
+    dialog.getByLabel("Type", { exact: true }).locator("option"),
+  ).toHaveText(["Hardware", "Software"]);
   await dialog.getByLabel("Component name").fill("Flight controller firmware");
   await dialog
     .getByRole("button", { name: "Add component", exact: true })
@@ -1025,6 +1110,9 @@ test("adding components defaults to the active view and reveals an explicitly di
     page,
     "Flight controller firmware, software component",
   );
+  await expect(
+    page.getByLabel("Type", { exact: true }).locator("option"),
+  ).toHaveText(["Hardware", "Software"]);
   await save(page);
 
   await page
@@ -1057,7 +1145,7 @@ test("adding components defaults to the active view and reveals an explicitly di
   ]);
 });
 
-test("Connect defaults to visible components and creating or editing cross-type edges reveals the diagram", async ({
+test("mixed-type connections stay editable without displaying unrelated components in the active view", async ({
   page,
 }) => {
   const original = await seedConnectedSystem(page);
@@ -1100,16 +1188,12 @@ test("Connect defaults to visible components and creating or editing cross-type 
     })
     .click();
   await page.getByLabel("To", { exact: true }).selectOption("firmware");
-  await expect(page.getByRole("button", { name: /^Diagram/ })).toHaveAttribute(
+  await expect(page.getByRole("button", { name: /^Hardware/ })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
-  await expect(
-    page.getByRole("button", {
-      name: "Connection from Controller to Firmware: Serial",
-      exact: true,
-    }),
-  ).toBeVisible();
+  await expect(page.locator(".canvas-connection")).toHaveCount(0);
+  await expect(page.locator(".canvas-node.software")).toHaveCount(0);
   await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Serial");
   await save(page);
   await page.getByRole("button", { name: /^Software/ }).click();
@@ -1124,16 +1208,12 @@ test("Connect defaults to visible components and creating or editing cross-type 
   await dialog
     .getByRole("button", { name: "Add connection", exact: true })
     .click();
-  await expect(page.getByRole("button", { name: /^Diagram/ })).toHaveAttribute(
+  await expect(page.getByRole("button", { name: /^Software/ })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
-  await expect(
-    page.getByRole("button", {
-      name: "Connection from Firmware to Controller: Controls board",
-      exact: true,
-    }),
-  ).toBeVisible();
+  await expect(page.locator(".canvas-connection")).toHaveCount(0);
+  await expect(page.locator(".canvas-node.hardware")).toHaveCount(0);
   await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
     "Controls board",
   );
@@ -1155,6 +1235,35 @@ test("Connect defaults to visible components and creating or editing cross-type 
     to: "controller",
     label: "Controls board",
   });
+  await page.reload();
+  await page
+    .getByRole("button", {
+      name: "Controller, hardware component",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole("button", {
+      name: "Edit connection: Controls board",
+      exact: true,
+    })
+    .click();
+  await expect(page.getByRole("button", { name: /^Diagram/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
+    "Controls board",
+  );
+  await expect(page.getByLabel("From", { exact: true })).toHaveValue(
+    "firmware",
+  );
+  await expect(page.getByLabel("To", { exact: true })).toHaveValue(
+    "controller",
+  );
+  await expect(page.locator(".canvas-node.software")).toHaveCount(0);
+  await expect(page.locator(".canvas-connection")).toHaveCount(0);
+  expect(await workspace.call("system.get", { projectId })).toEqual(saved);
 });
 
 test("every device outline fits a narrow canvas without hiding the selector or save action", async ({

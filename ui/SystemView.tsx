@@ -152,7 +152,9 @@ export function SystemView(props: Props) {
     onNavigate,
   } = props;
   const [selection, setSelection] = useState<Selection>(null);
-  const [filter, setFilter] = useState<"all" | Component["kind"]>("all");
+  const [filter, setFilter] = useState<"diagram" | "hardware" | "software">(
+    "diagram",
+  );
   const [viewport, setViewport] = useState({ x: 80, y: 90, scale: 1 });
   const [modal, setModal] = useState<
     "component" | "connection" | "evidence" | "drafts" | null
@@ -178,23 +180,24 @@ export function SystemView(props: Props) {
     scale: number;
   } | null>(null);
   const displayed = draft?.system || system;
-  const hasOutline = filter === "all" && displayed.layout !== "blank";
+  const diagramView = filter === "diagram";
+  const visibleKind = filter === "software" ? "software" : "hardware";
+  const nodeWidth = diagramView ? 40 : 224;
+  const nodeHeight = diagramView ? 40 : 124;
+  const hasOutline = diagramView && displayed.layout !== "blank";
   const visibleComponents = displayed.components.filter(
-    (item) => filter === "all" || item.kind === filter,
+    (item) => item.kind === visibleKind,
   );
-  const visibleIds = new Set(visibleComponents.map((item) => item.id));
+  const connectableComponents = displayed.components.filter(
+    (item) => item.kind !== "external",
+  );
   const component =
     selection?.type === "component"
       ? visibleComponents.find((item) => item.id === selection.id)
       : undefined;
   const connection =
     selection?.type === "connection"
-      ? displayed.connections.find(
-          (item) =>
-            item.id === selection.id &&
-            visibleIds.has(item.from) &&
-            visibleIds.has(item.to),
-        )
+      ? displayed.connections.find((item) => item.id === selection.id)
       : undefined;
   const selected = component || connection;
   const readOnly = !!draft;
@@ -209,7 +212,7 @@ export function SystemView(props: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [dirty, saving, readOnly, onSave]);
   function openComponent() {
-    setKind(filter === "all" ? "hardware" : filter);
+    setKind(visibleKind);
     setModal("component");
   }
   const updateComponent = (update: Partial<Component>) => {
@@ -220,7 +223,11 @@ export function SystemView(props: Props) {
         item.id === component.id ? { ...item, ...update } : item,
       ),
     });
-    if (update.kind && filter !== "all" && update.kind !== filter)
+    if (
+      update.kind &&
+      update.kind !== "external" &&
+      update.kind !== visibleKind
+    )
       setFilter(update.kind);
   };
   const updateConnection = (update: Partial<Connection>) => {
@@ -232,12 +239,12 @@ export function SystemView(props: Props) {
         item.id === connection.id ? next : item,
       ),
     });
-    if (!visibleIds.has(next.from) || !visibleIds.has(next.to))
-      setFilter("all");
   };
   function addComponent(e: React.FormEvent) {
     e.preventDefault();
-    const first = system.components.length === 0;
+    const first = !system.components.some((item) => item.kind === kind);
+    const width = diagramView && kind === "hardware" ? 40 : 224;
+    const height = diagramView && kind === "hardware" ? 40 : 124;
     const item: Component = {
       id: newId("component"),
       label: label.trim(),
@@ -245,13 +252,13 @@ export function SystemView(props: Props) {
       description: "",
       x: first
         ? hasOutline
-          ? (OUTLINE_BOUNDS.width - 224) / 2
+          ? (OUTLINE_BOUNDS.width - width) / 2
           : 0
         : Math.max(20, (120 - viewport.x) / viewport.scale) +
           (system.components.length % 3) * 50,
       y: first
         ? hasOutline
-          ? (OUTLINE_BOUNDS.height - 124) / 2
+          ? (OUTLINE_BOUNDS.height - height) / 2
           : 0
         : Math.max(20, (120 - viewport.y) / viewport.scale) +
           (system.components.length % 5) * 45,
@@ -261,13 +268,13 @@ export function SystemView(props: Props) {
     if (first && !hasOutline) {
       const rect = canvasRef.current?.getBoundingClientRect();
       setViewport({
-        x: Math.min(48, Math.max(16, ((rect?.width || 320) - 224) / 2)),
-        y: Math.max(16, Math.min(64, ((rect?.height || 400) - 124) / 2)),
+        x: Math.min(48, Math.max(16, ((rect?.width || 320) - width) / 2)),
+        y: Math.max(16, Math.min(64, ((rect?.height || 400) - height) / 2)),
         scale: 1,
       });
     }
     onChange({ ...system, components: [...system.components, item] });
-    if (filter !== "all" && filter !== kind) setFilter(kind);
+    if (kind !== "external" && kind !== visibleKind) setFilter(kind);
     setSelection({ type: "component", id: item.id });
     setModal(null);
     setLabel("");
@@ -308,11 +315,11 @@ export function SystemView(props: Props) {
         ...(hasOutline ? [OUTLINE_BOUNDS.y] : []),
       );
     const maxX = Math.max(
-        ...visibleComponents.map((c) => c.x + 224),
+        ...visibleComponents.map((c) => c.x + nodeWidth),
         ...(hasOutline ? [OUTLINE_BOUNDS.width] : []),
       ),
       maxY = Math.max(
-        ...visibleComponents.map((c) => c.y + 124),
+        ...visibleComponents.map((c) => c.y + nodeHeight),
         ...(hasOutline ? [OUTLINE_BOUNDS.height] : []),
       );
     const rect = canvasRef.current.getBoundingClientRect();
@@ -471,7 +478,7 @@ export function SystemView(props: Props) {
       </div>
       <div className="canvas-toolbar">
         <div className="canvas-view-controls">
-          {filter === "all" && (
+          {diagramView && (
             <div className="outline-control">
               <select
                 className="outline-select"
@@ -496,10 +503,9 @@ export function SystemView(props: Props) {
           )}
           <div className="filter-tabs" aria-label="Component filter">
             {[
-              ["all", "Diagram", displayed.components.length],
+              ["diagram", "Diagram", counts("hardware")],
               ["hardware", "Hardware", counts("hardware")],
               ["software", "Software", counts("software")],
-              ["external", "External", counts("external")],
             ].map(([value, name, count]) => (
               <button
                 key={value}
@@ -520,13 +526,18 @@ export function SystemView(props: Props) {
           <Button
             icon="link"
             variant="ghost"
-            disabled={readOnly || visibleComponents.length < 2}
+            disabled={readOnly || connectableComponents.length < 2}
             onClick={() => {
               const initialFrom =
-                component?.id || visibleComponents[0]?.id || "";
+                component?.id ||
+                visibleComponents[0]?.id ||
+                connectableComponents[0]?.id ||
+                "";
               setFrom(initialFrom);
               setTo(
-                visibleComponents.find((c) => c.id !== initialFrom)?.id || "",
+                visibleComponents.find((c) => c.id !== initialFrom)?.id ||
+                  connectableComponents.find((c) => c.id !== initialFrom)?.id ||
+                  "",
               );
               setConnectionLabel("");
               setModal("connection");
@@ -640,11 +651,14 @@ export function SystemView(props: Props) {
                 const a = visibleComponents.find((c) => c.id === item.from),
                   b = visibleComponents.find((c) => c.id === item.to);
                 if (!a || !b) return null;
-                const ax = a.x + 224,
-                  ay = a.y + 60,
-                  bx = b.x,
-                  by = b.y + 60,
-                  bend = Math.max(70, Math.abs(bx - ax) / 2);
+                const direction = b.x >= a.x ? 1 : -1;
+                const ax = a.x + (direction === 1 ? nodeWidth : 0),
+                  ay = a.y + nodeHeight / 2,
+                  bx = b.x + (direction === 1 ? 0 : nodeWidth),
+                  by = b.y + nodeHeight / 2,
+                  bend =
+                    direction *
+                    Math.max(diagramView ? 32 : 70, Math.abs(bx - ax) / 2);
                 return (
                   <g
                     key={item.id}
@@ -690,7 +704,7 @@ export function SystemView(props: Props) {
                 role="button"
                 tabIndex={0}
                 aria-label={`${item.label}, ${item.kind} component`}
-                className={`canvas-node ${item.kind} ${selection?.id === item.id ? "selected" : ""}`}
+                className={`canvas-node ${diagramView ? "diagram-node" : ""} ${item.kind} ${selection?.id === item.id ? "selected" : ""}`}
                 style={{ left: item.x, top: item.y }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
@@ -750,43 +764,52 @@ export function SystemView(props: Props) {
                   }
                 }}
               >
-                <span className="node-port input-port" />
-                <div className="node-top">
-                  <span className={`node-icon ${item.kind}`}>
-                    <Icon
-                      name={
-                        item.kind === "hardware"
-                          ? "chip"
-                          : item.kind === "software"
-                            ? "code"
-                            : "globe"
-                      }
-                      size={18}
-                    />
-                  </span>
-                  <span>{item.kind}</span>
-                </div>
-                <strong>{item.label}</strong>
-                <div className="node-footer">
-                  <span>
-                    {item.ports.length
-                      ? `${item.ports.length} ports`
-                      : "Component"}
-                  </span>
-                  <span>
-                    <Icon name="link" size={12} />
-                    {item.evidence.length}
-                  </span>
-                </div>
-                <span className="node-port output-port" />
+                {diagramView ? (
+                  <>
+                    <span className="diagram-symbol">
+                      <Icon name="chip" size={22} />
+                    </span>
+                    <span className="diagram-label">{item.label}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="node-port input-port" />
+                    <div className="node-top">
+                      <span className={`node-icon ${item.kind}`}>
+                        <Icon
+                          name={
+                            item.kind === "hardware"
+                              ? "chip"
+                              : item.kind === "software"
+                                ? "code"
+                                : "globe"
+                          }
+                          size={18}
+                        />
+                      </span>
+                      <span>{item.kind}</span>
+                    </div>
+                    <strong>{item.label}</strong>
+                    <div className="node-footer">
+                      <span>
+                        {item.ports.length
+                          ? `${item.ports.length} ports`
+                          : "Component"}
+                      </span>
+                      <span>
+                        <Icon name="link" size={12} />
+                        {item.evidence.length}
+                      </span>
+                    </div>
+                    <span className="node-port output-port" />
+                  </>
+                )}
               </div>
             ))}
           </div>
           {!visibleComponents.length && !hasOutline && (
             <div className="canvas-empty">
-              <h2>
-                {filter === "all" ? "No components" : `No ${filter} components`}
-              </h2>
+              <h2>{`No ${visibleKind} components`}</h2>
               <Button
                 variant="primary"
                 icon="plus"
@@ -852,7 +875,6 @@ export function SystemView(props: Props) {
                       >
                         <option value="hardware">Hardware</option>
                         <option value="software">Software</option>
-                        <option value="external">External</option>
                       </select>
                     </Field>
                     <Field label="Description">
@@ -962,6 +984,52 @@ export function SystemView(props: Props) {
                     </Field>
                   </>
                 )}
+                {component &&
+                  displayed.connections.some(
+                    (item) =>
+                      item.from === component.id || item.to === component.id,
+                  ) && (
+                    <>
+                      <div className="inspector-section-title">
+                        <span>Connections</span>
+                      </div>
+                      <div className="component-connections">
+                        {displayed.connections
+                          .filter(
+                            (item) =>
+                              item.from === component.id ||
+                              item.to === component.id,
+                          )
+                          .map((item) => {
+                            const source = displayed.components.find(
+                              (candidate) => candidate.id === item.from,
+                            );
+                            const target = displayed.components.find(
+                              (candidate) => candidate.id === item.to,
+                            );
+                            const name =
+                              item.label ||
+                              `${source?.label || item.from} → ${target?.label || item.to}`;
+                            return (
+                              <button
+                                key={item.id}
+                                aria-label={`Edit connection: ${name}`}
+                                onClick={() =>
+                                  setSelection({
+                                    type: "connection",
+                                    id: item.id,
+                                  })
+                                }
+                              >
+                                <Icon name="link" size={15} />
+                                <span>{name}</span>
+                                <Icon name="chevron" size={15} />
+                              </button>
+                            );
+                          })}
+                      </div>
+                    </>
+                  )}
                 <div className="inspector-section-title">
                   <span>Evidence</span>
                   <Badge>{selected.evidence.length}</Badge>
@@ -1082,7 +1150,6 @@ export function SystemView(props: Props) {
               >
                 <option value="hardware">Hardware</option>
                 <option value="software">Software</option>
-                <option value="external">External system</option>
               </select>
             </Field>
             <footer className="modal-actions">
@@ -1117,15 +1184,13 @@ export function SystemView(props: Props) {
                 ...system,
                 connections: [...system.connections, item],
               });
-              if (!visibleIds.has(from) || !visibleIds.has(to))
-                setFilter("all");
               setSelection({ type: "connection", id: item.id });
               setModal(null);
             }}
           >
             <Field label="From">
               <select value={from} onChange={(e) => setFrom(e.target.value)}>
-                {system.components.map((c) => (
+                {connectableComponents.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.label}
                   </option>
@@ -1134,7 +1199,7 @@ export function SystemView(props: Props) {
             </Field>
             <Field label="To">
               <select value={to} onChange={(e) => setTo(e.target.value)}>
-                {system.components.map((c) => (
+                {connectableComponents.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.label}
                   </option>
@@ -1254,7 +1319,7 @@ export function SystemView(props: Props) {
                         setDraft(item);
                         setSelection(null);
                         setModal(null);
-                        setFilter("all");
+                        setFilter("diagram");
                       }}
                     >
                       Review on canvas

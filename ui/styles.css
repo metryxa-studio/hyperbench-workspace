@@ -667,6 +667,48 @@ button svg {
   border-color: var(--text-secondary);
   outline: 2px solid var(--accent-soft);
 }
+.canvas-node.diagram-node {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+}
+.diagram-symbol {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+.diagram-node:is(:hover, :focus-visible, .selected) .diagram-symbol {
+  color: var(--text);
+  background: var(--surface-raised);
+  border-radius: 5px;
+}
+.diagram-label {
+  display: none;
+  position: absolute;
+  top: 46px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 200px;
+  width: max-content;
+  padding: 4px 7px;
+  background: var(--surface-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  z-index: 2;
+}
+.diagram-node:is(:hover, :focus-visible, .selected) .diagram-label {
+  display: block;
+}
 .canvas-node.software {
   background: var(--surface-raised);
   border-color: var(--muted);
@@ -722,7 +764,7 @@ button svg {
 }
 .node-port {
   position: absolute;
-  top: 55px;
+  top: calc(50% - 4px);
   width: 8px;
   height: 8px;
   border: 1px solid var(--text-secondary);
@@ -780,6 +822,23 @@ button svg {
 }
 .inspector.no-selection {
   display: none;
+}
+.component-connections {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.component-connections button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px;
+}
+.component-connections button span {
+  flex: 1;
+  overflow-wrap: anywhere;
 }
 .inspector-title {
   display: flex;

@@ -16,7 +16,11 @@ Without this environment variable, `npm test` skips the real SSH integration. Th
 
 ## Unreleased — system views and editing
 
-TypeScript and the production build pass. All 46 backend tests and 19 Chromium workflows pass locally. The browser checks cover visible Hardware/Software switching, type-specific empty states, fitting widely separated components, component creation in the selected view, and cross-type connection edits. All seven outline labels and their dropdown arrows remain within the control at a 390 px viewport width.
+Diagram now shows hardware only, using 22 px chip icons with 40 px hit targets. Names appear on hover, focus, or selection. Hardware and Software retain detailed cards. The External tab and type options are removed; existing stored components and links remain intact. Mixed-type connections can be inspected through a component's Connections list without putting software cards on the physical diagram. The “Agent drafts” label is unchanged.
+
+After integrating the SSH test-bench update, the production build, TypeScript check, and all 22 Chromium workflows pass. The backend suite passes 58 tests; its optional real-SSH integration is skipped without connection settings. The new browser checks verify symbol sizing, keyboard name disclosure, available type options, mixed-type connection creation and inspection, and unchanged hidden components/links after save and reload. Manual browser checks exercised the hardware symbol, connection inspector, and separate Software view.
+
+The earlier view/editing update passed TypeScript, the production build, 46 backend tests, and 19 Chromium workflows. Those browser checks cover visible Hardware/Software switching, type-specific empty states, fitting widely separated components, component creation in the selected view, and cross-type connection edits. All seven outline labels and their dropdown arrows remain within the control at a 390 px viewport width.
 
 The added save checks exercise real keystrokes in port lists, shortcut saves, removed port references, constrained endpoint choices, canceled draft acceptance, and read-only draft previews. Concurrent-save tests verify that an external update refreshes a clean browser but never replaces pending edits, including when its response arrives after editing starts. Browser clicks also exercised the final dropdown, view switching, component creation, and connection-port selection in an isolated local workspace.
 
