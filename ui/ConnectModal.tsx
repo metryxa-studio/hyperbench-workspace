@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Project } from "../src/types";
 import type { Config } from "./api";
-import { Button, Modal } from "./common";
+import { Button, Modal, ErrorBanner } from "./common";
 
 export function ConnectModal({
   project,
@@ -13,7 +13,9 @@ export function ConnectModal({
   onClose: () => void;
 }) {
   const [format, setFormat] = useState<"toml" | "json">("toml");
-  const [copied, setCopied] = useState(false);
+  const [copiedSnippet, setCopiedSnippet] = useState("");
+  const [copyError, setCopyError] = useState("");
+  const copyRequest = useRef(0);
   const args = [
     config.cliPath,
     "mcp",
@@ -30,13 +32,36 @@ export function ConnectModal({
           null,
           2,
         );
+  const copied = copiedSnippet === snippet;
+  useEffect(() => {
+    copyRequest.current++;
+    setCopiedSnippet("");
+    setCopyError("");
+  }, [snippet]);
+  useEffect(() => {
+    if (!copiedSnippet) return;
+    const timer = setTimeout(() => setCopiedSnippet(""), 2000);
+    return () => clearTimeout(timer);
+  }, [copiedSnippet]);
+  useEffect(
+    () => () => {
+      copyRequest.current++;
+    },
+    [],
+  );
   async function copy() {
+    const request = ++copyRequest.current;
+    setCopyError("");
     try {
       await navigator.clipboard.writeText(snippet);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (request === copyRequest.current) setCopiedSnippet(snippet);
     } catch {
-      setCopied(false);
+      if (request === copyRequest.current) {
+        setCopiedSnippet("");
+        setCopyError(
+          "Clipboard access failed. Select the configuration below and copy it manually.",
+        );
+      }
     }
   }
   return (
@@ -68,6 +93,7 @@ export function ConnectModal({
           {copied ? "Copied" : "Copy"}
         </Button>
       </div>
+      {copyError && <ErrorBanner>{copyError}</ErrorBanner>}
       <pre className="code-snippet" tabIndex={0}>
         {snippet}
       </pre>
@@ -75,9 +101,9 @@ export function ConnectModal({
         <span>2</span> Reload your agent
       </div>
       <blockquote className="agent-prompt">
-        Read my Hyperbench project context and list my test benches. Inspect the repositories and
-        documents, cite file lines or document pages, and propose system changes
-        as a draft for my review.
+        Read my Hyperbench project context and list my test benches. Inspect the
+        repositories and documents, cite file lines or document pages, and
+        propose system changes as a draft for my review.
       </blockquote>
       <footer className="modal-actions">
         <Button onClick={onClose}>Done</Button>

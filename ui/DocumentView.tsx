@@ -47,8 +47,11 @@ export function DocumentView({
   const selected = documents.find((doc) => doc.id === documentId);
   const [content, setContent] = useState<DocumentContent | null>(null),
     [pageImage, setPageImage] = useState(""),
-    [loading, setLoading] = useState(false);
+    [loading, setLoading] = useState(false),
+    [rendering, setRendering] = useState(false),
+    [readAttempt, setReadAttempt] = useState(0);
   const [error, setError] = useState(""),
+    [readError, setReadError] = useState(""),
     [renderError, setRenderError] = useState(""),
     [modalError, setModalError] = useState(""),
     [busy, setBusy] = useState(false),
@@ -69,11 +72,12 @@ export function DocumentView({
   const inputRef = useRef<HTMLInputElement>(null);
   const searchRequestId = useRef(0);
   const [showDocuments, setShowDocuments] = useState(false);
+  const documentIds = documents.map((doc) => doc.id).join(",");
   useEffect(() => {
     searchRequestId.current++;
     setSearch(null);
     setSearching(false);
-  }, [project.id, query]);
+  }, [project.id, query, documentIds]);
   const links =
     system?.links.filter((link) => link.documentId === documentId) || [];
   const evidenceReferences = system
@@ -140,83 +144,95 @@ export function DocumentView({
     let active = true;
     setContent(null);
     setPageImage("");
-    setError("");
+    setReadError("");
     setRenderError("");
+    setLoading(!!selected);
+    setRendering(selected?.mime === "application/pdf");
     if (!selected) return;
-    setLoading(true);
-    const read = call<DocumentContent>("documents.read", {
+    void call<DocumentContent>("documents.read", {
       projectId: project.id,
       documentId: selected.id,
       page,
-    }).then((result) => {
-      if (active) setContent(result);
-    });
-    const render =
-      selected.mime === "application/pdf"
-        ? call<{ data: string; mimeType: string }>("documents.page", {
-            projectId: project.id,
-            documentId: selected.id,
-            page,
-            scale: 1.5,
-          })
-            .then((result) => {
-              if (active)
-                setPageImage(
-                  result.data.startsWith("data:")
-                    ? result.data
-                    : `data:${result.mimeType};base64,${result.data}`,
-                );
-            })
-            .catch((e) => {
-              if (active) setRenderError(message(e));
-            })
-        : Promise.resolve();
-    void Promise.all([read, render])
+    })
+      .then((result) => {
+        if (active) setContent(result);
+      })
       .catch((e) => {
-        if (active) setError(message(e));
+        if (active) setReadError(message(e));
       })
       .finally(() => {
         if (active) setLoading(false);
       });
+    if (selected.mime === "application/pdf")
+      void call<{ data: string; mimeType: string }>("documents.page", {
+        projectId: project.id,
+        documentId: selected.id,
+        page,
+        scale: 1.5,
+      })
+        .then((result) => {
+          if (active)
+            setPageImage(
+              result.data.startsWith("data:")
+                ? result.data
+                : `data:${result.mimeType};base64,${result.data}`,
+            );
+        })
+        .catch((e) => {
+          if (active) setRenderError(message(e));
+        })
+        .finally(() => {
+          if (active) setRendering(false);
+        });
     return () => {
       active = false;
     };
-  }, [selected?.id, project.id, page]);
+  }, [selected?.id, project.id, page, readAttempt]);
   function choose(docId: string, nextPage = 1) {
     setShowDocuments(false);
     setDocumentId(docId);
     setPage(nextPage);
   }
   async function upload(files: FileList | File[]) {
-    if (!files.length || uploading) return;
+    if (!files.length || uploading || busy) return;
     setUploading(true);
     setModalError("");
     setError("");
     try {
       let last: DocumentSummary | null = null;
+      let imported = 0;
+      const failures: string[] = [];
       for (const file of Array.from(files)) {
-        if (file.size > 32 * 1024 * 1024)
-          throw new Error(
-            `${file.name} is larger than the 32 MiB import limit. Split or compress the document before importing it.`,
-          );
-        const buffer = new Uint8Array(await file.arrayBuffer());
-        let binary = "";
-        for (let offset = 0; offset < buffer.length; offset += 32768)
-          binary += String.fromCharCode(
-            ...buffer.subarray(offset, offset + 32768),
-          );
-        last = await call<DocumentSummary>("documents.upload", {
-          projectId: project.id,
-          name: file.name,
-          base64: btoa(binary),
-        });
+        try {
+          if (file.size > 32 * 1024 * 1024)
+            throw new Error("Exceeds the 32 MiB import limit.");
+          const buffer = new Uint8Array(await file.arrayBuffer());
+          let binary = "";
+          for (let offset = 0; offset < buffer.length; offset += 32768)
+            binary += String.fromCharCode(
+              ...buffer.subarray(offset, offset + 32768),
+            );
+          last = await call<DocumentSummary>("documents.upload", {
+            projectId: project.id,
+            name: file.name,
+            base64: btoa(binary),
+          });
+          imported++;
+        } catch (e) {
+          failures.push(`${file.name}: ${message(e)}`);
+        }
       }
       await onRefresh();
       if (last) choose(last.id);
-      setModal(null);
-      notify(
-        `${files.length === 1 ? "Document" : `${files.length} documents`} imported`,
-      );
+      if (failures.length) {
+        const details = failures.join("\n");
+        setModalError(details);
+        setError(details);
+      } else setModal(null);
+      if (imported)
+        notify(
+          `${imported === 1 ? "Document" : `${imported} documents`} imported`,
+        );
     } catch (e) {
       setModalError(message(e));
       setError(message(e));
@@ -228,6 +244,7 @@ export function DocumentView({
   }
   async function importPath(e: React.FormEvent) {
     e.preventDefault();
+    if (busy || uploading) return;
     setBusy(true);
     setModalError("");
     try {
@@ -579,7 +596,11 @@ export function DocumentView({
                 <div
                   className={`document-page ${mode === "text" || selected.mime !== "application/pdf" ? "text-mode" : ""}`}
                 >
-                  {loading ? (
+                  {(
+                    mode === "page" && selected.mime === "application/pdf"
+                      ? rendering
+                      : loading
+                  ) ? (
                     <Loading>Reading page {page}…</Loading>
                   ) : mode === "page" && selected.mime === "application/pdf" ? (
                     pageImage ? (
@@ -594,6 +615,11 @@ export function DocumentView({
                         <p>
                           {renderError || "The page could not be rendered."}
                         </p>
+                        <Button
+                          onClick={() => setReadAttempt((value) => value + 1)}
+                        >
+                          Retry page preview
+                        </Button>
                         <Button onClick={() => setMode("text")}>
                           Read extracted text
                         </Button>
@@ -602,6 +628,15 @@ export function DocumentView({
                         </Button>
                       </div>
                     )
+                  ) : readError ? (
+                    <div>
+                      <ErrorBanner>{readError}</ErrorBanner>
+                      <Button
+                        onClick={() => setReadAttempt((value) => value + 1)}
+                      >
+                        Retry reading document
+                      </Button>
+                    </div>
                   ) : (
                     <pre className="document-text">
                       {content?.pages.map((p) => p.text).join("\n\n") ||

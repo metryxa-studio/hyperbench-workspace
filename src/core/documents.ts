@@ -43,13 +43,11 @@ function validateBytes(bytes: Buffer): void {
 }
 
 function isPdf(bytes: Buffer): boolean {
-  // PDF readers permit a short preamble before the file header.
   return /%PDF-\d\.\d/.test(bytes.subarray(0, 1024).toString("latin1"));
 }
 
 function boundedText(text: string, limit: number): string {
   let end = Math.min(text.length, limit);
-  // Do not split an emoji or another supplementary Unicode character.
   if (end < text.length && end > 0 && /[\uD800-\uDBFF]/.test(text[end - 1]))
     end -= 1;
   return text.slice(0, end);
@@ -63,11 +61,9 @@ async function withPdf<T>(
   const packageRoot = dirname(
     createRequire(import.meta.url).resolve("pdfjs-dist/package.json"),
   );
-  // PDF.js requires a forward slash suffix, even for a Windows filesystem path.
   const localAssets = (directory: string): string =>
     join(packageRoot, directory) + "/";
   const task = getDocument({
-    // PDF.js may transfer its input. Keep the caller's original Buffer intact.
     data: Uint8Array.from(bytes),
     cMapUrl: localAssets("cmaps"),
     cMapPacked: true,
@@ -124,8 +120,6 @@ async function extractPageText(
     reader.releaseLock();
   }
 }
-
-/** Extract bounded embedded text. Scanned PDF pages require a separate OCR tool. */
 export async function processDocument(
   bytes: Buffer,
   name: string,
@@ -181,7 +175,6 @@ export async function processDocument(
         characters += extracted.text.length;
         if (extracted.truncated) truncatedPages.push(number);
       } catch {
-        // Preserve access to the original and renderable pages while declaring gaps.
         pages.push({ page: number, text: "" });
         failedPages.push(number);
       } finally {
@@ -245,7 +238,6 @@ async function readDocumentBytes(filePath: string): Promise<Buffer> {
       );
     if (stat.size > MAX_DOCUMENT_BYTES)
       throw new Error("Documents must be at most 32 MiB.");
-    // Read through the opened descriptor, bounded even if another process grows the file.
     const buffer = Buffer.alloc(
       Math.min(stat.size + 1, MAX_DOCUMENT_BYTES + 1),
     );
@@ -295,8 +287,6 @@ function validateCrop(crop: DocumentCrop | undefined): DocumentCrop {
   }
   return { x: crop.x, y: crop.y, width: crop.width, height: crop.height };
 }
-
-/** Render a PDF page, with crop coordinates relative to the displayed, rotated page. */
 export async function renderDocumentPage(
   filePath: string,
   page: number,
@@ -325,15 +315,9 @@ export async function renderDocumentPage(
       if (
         ![fullWidth, fullHeight].every(
           (value) => Number.isSafeInteger(value) && value > 0,
-        ) ||
-        fullWidth > MAX_RENDER_DIMENSION ||
-        fullHeight > MAX_RENDER_DIMENSION ||
-        fullWidth * fullHeight > MAX_RENDER_PIXELS
-      ) {
-        throw new Error(
-          "Rendered page exceeds 4096 pixels per dimension or 12 million pixels; use a smaller scale.",
-        );
-      }
+        )
+      )
+        throw new Error("The PDF page has invalid dimensions.");
       const left = Math.floor(viewport.width * rectangle.x);
       const top = Math.floor(viewport.height * rectangle.y);
       const width = Math.max(
@@ -344,12 +328,19 @@ export async function renderDocumentPage(
         1,
         Math.ceil(viewport.height * (rectangle.y + rectangle.height)) - top,
       );
+      if (
+        width > MAX_RENDER_DIMENSION ||
+        height > MAX_RENDER_DIMENSION ||
+        width * height > MAX_RENDER_PIXELS
+      )
+        throw new Error(
+          "Rendered page exceeds 4096 pixels per dimension or 12 million pixels; use a smaller scale or crop.",
+        );
       const { createCanvas } = await import("@napi-rs/canvas");
       const canvas = createCanvas(width, height);
       try {
         await pdfPage.render({
           canvas: null,
-          // The native canvas implements the runtime 2D API but has no DOM element.
           canvasContext: canvas.getContext(
             "2d",
           ) as unknown as CanvasRenderingContext2D,
@@ -370,7 +361,6 @@ export async function renderDocumentPage(
           height,
         };
       } finally {
-        // Release the native pixel allocation promptly.
         canvas.width = 1;
         canvas.height = 1;
       }

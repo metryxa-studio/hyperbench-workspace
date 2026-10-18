@@ -7,9 +7,6 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Workspace } from "../src/core/workspace.ts";
 import type { BenchCommandResult, Project, TestBench } from "../src/types.ts";
-
-// Opt in with a disposable SSH target. The JSON file supplies host, port,
-// username, identityFile and knownHostsFile. No keys belong in the repository.
 const configPath = process.env.HYPERBENCH_SSH_TEST_CONFIG;
 test("real SSH bench works through workspace and stdio MCP", {
   skip: !configPath,

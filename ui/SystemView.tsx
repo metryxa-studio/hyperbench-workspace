@@ -35,6 +35,11 @@ const outlineLabels: Record<SystemLayout, string> = {
   truck: "Truck",
 };
 
+const MAX_COORDINATE = 1_000_000;
+function clampCoordinate(value: number) {
+  return Math.max(-MAX_COORDINATE, Math.min(MAX_COORDINATE, value));
+}
+
 function parsePorts(value: string) {
   return [
     ...new Set(
@@ -245,28 +250,35 @@ export function SystemView(props: Props) {
     const first = !system.components.some((item) => item.kind === kind);
     const width = diagramView && kind === "hardware" ? 40 : 224;
     const height = diagramView && kind === "hardware" ? 40 : 124;
+    const rect = canvasRef.current?.getBoundingClientRect();
+    const offset = (system.components.length % 5) * 16;
     const item: Component = {
       id: newId("component"),
       label: label.trim(),
       kind,
       description: "",
-      x: first
-        ? hasOutline
-          ? (OUTLINE_BOUNDS.width - width) / 2
-          : 0
-        : Math.max(20, (120 - viewport.x) / viewport.scale) +
-          (system.components.length % 3) * 50,
-      y: first
-        ? hasOutline
-          ? (OUTLINE_BOUNDS.height - height) / 2
-          : 0
-        : Math.max(20, (120 - viewport.y) / viewport.scale) +
-          (system.components.length % 5) * 45,
+      x: clampCoordinate(
+        first
+          ? hasOutline
+            ? (OUTLINE_BOUNDS.width - width) / 2
+            : 0
+          : ((rect?.width || 320) / 2 - viewport.x) / viewport.scale -
+              width / 2 +
+              offset,
+      ),
+      y: clampCoordinate(
+        first
+          ? hasOutline
+            ? (OUTLINE_BOUNDS.height - height) / 2
+            : 0
+          : ((rect?.height || 400) / 2 - viewport.y) / viewport.scale -
+              height / 2 +
+              offset,
+      ),
       ports: [],
       evidence: [],
     };
     if (first && !hasOutline) {
-      const rect = canvasRef.current?.getBoundingClientRect();
       setViewport({
         x: Math.min(48, Math.max(16, ((rect?.width || 320) - width) / 2)),
         y: Math.max(16, Math.min(64, ((rect?.height || 400) - height) / 2)),
@@ -326,13 +338,8 @@ export function SystemView(props: Props) {
     const paddingX = rect.width < 600 ? 32 : 80;
     const scale = Math.min(
       1,
-      Math.max(
-        0.25,
-        Math.min(
-          (rect.width - paddingX) / Math.max(1, maxX - minX),
-          (rect.height - 64) / Math.max(1, maxY - minY),
-        ),
-      ),
+      Math.max(1, rect.width - paddingX) / Math.max(1, maxX - minX),
+      Math.max(1, rect.height - 64) / Math.max(1, maxY - minY),
     );
     setViewport({
       x: (rect.width - (maxX - minX) * scale) / 2 - minX * scale,
@@ -347,7 +354,7 @@ export function SystemView(props: Props) {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     setViewport((v) => {
-      const scale = Math.max(0.25, Math.min(2, v.scale * factor));
+      const scale = Math.max(0.000001, Math.min(2, v.scale * factor));
       return {
         scale,
         x: rect.width / 2 - ((rect.width / 2 - v.x) * scale) / v.scale,
@@ -374,6 +381,10 @@ export function SystemView(props: Props) {
   function movePointer(e: React.PointerEvent) {
     const d = dragRef.current;
     if (!d) return;
+    if (!(e.buttons & 1)) {
+      dragRef.current = null;
+      return;
+    }
     if (d.id && !readOnly) {
       const next = systemRef.current;
       onChange({
@@ -382,8 +393,12 @@ export function SystemView(props: Props) {
           item.id === d.id
             ? {
                 ...item,
-                x: Math.round(d.x + (e.clientX - d.clientX) / d.scale),
-                y: Math.round(d.y + (e.clientY - d.clientY) / d.scale),
+                x: clampCoordinate(
+                  Math.round(d.x + (e.clientX - d.clientX) / d.scale),
+                ),
+                y: clampCoordinate(
+                  Math.round(d.y + (e.clientY - d.clientY) / d.scale),
+                ),
               }
             : item,
         ),
@@ -406,7 +421,7 @@ export function SystemView(props: Props) {
           anchorY = event.clientY - rect.top;
         setViewport((v) => {
           const scale = Math.max(
-            0.25,
+            0.000001,
             Math.min(2, v.scale * (event.deltaY > 0 ? 0.93 : 1.07)),
           );
           return {
@@ -604,6 +619,9 @@ export function SystemView(props: Props) {
           onPointerCancel={() => {
             dragRef.current = null;
           }}
+          onLostPointerCapture={() => {
+            dragRef.current = null;
+          }}
           onKeyDown={(e) => {
             if (e.target !== e.currentTarget) return;
             if (e.key === "+" || e.key === "=") {
@@ -727,20 +745,22 @@ export function SystemView(props: Props) {
                         c.id === item.id
                           ? {
                               ...c,
-                              x:
+                              x: clampCoordinate(
                                 c.x +
-                                (e.key === "ArrowRight"
-                                  ? 10
-                                  : e.key === "ArrowLeft"
-                                    ? -10
-                                    : 0),
-                              y:
+                                  (e.key === "ArrowRight"
+                                    ? 10
+                                    : e.key === "ArrowLeft"
+                                      ? -10
+                                      : 0),
+                              ),
+                              y: clampCoordinate(
                                 c.y +
-                                (e.key === "ArrowDown"
-                                  ? 10
-                                  : e.key === "ArrowUp"
-                                    ? -10
-                                    : 0),
+                                  (e.key === "ArrowDown"
+                                    ? 10
+                                    : e.key === "ArrowUp"
+                                      ? -10
+                                      : 0),
+                              ),
                             }
                           : c,
                       ),
@@ -826,7 +846,9 @@ export function SystemView(props: Props) {
               label="Zoom out"
               onClick={() => zoom(1 / 1.2)}
             />
-            <span>{Math.round(viewport.scale * 100)}%</span>
+            <span>
+              {viewport.scale < 0.01 ? "<1" : Math.round(viewport.scale * 100)}%
+            </span>
             <IconButton
               name="zoomIn"
               label="Zoom in"
@@ -900,20 +922,28 @@ export function SystemView(props: Props) {
                       <Field label="X position">
                         <input
                           type="number"
+                          min={-MAX_COORDINATE}
+                          max={MAX_COORDINATE}
                           readOnly={readOnly}
                           value={component.x}
                           onChange={(e) =>
-                            updateComponent({ x: Number(e.target.value) })
+                            updateComponent({
+                              x: clampCoordinate(Number(e.target.value)),
+                            })
                           }
                         />
                       </Field>
                       <Field label="Y position">
                         <input
                           type="number"
+                          min={-MAX_COORDINATE}
+                          max={MAX_COORDINATE}
                           readOnly={readOnly}
                           value={component.y}
                           onChange={(e) =>
-                            updateComponent({ y: Number(e.target.value) })
+                            updateComponent({
+                              y: clampCoordinate(Number(e.target.value)),
+                            })
                           }
                         />
                       </Field>

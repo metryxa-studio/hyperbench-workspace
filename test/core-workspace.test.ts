@@ -652,7 +652,6 @@ test("document imports reject symlinks when the platform cannot enforce O_NOFOLL
   await writeFile(original, "PRIVATE_DOCUMENT_CANARY");
   await symlink(original, link, "file");
   const moduleUrl = new URL("../src/core/workspace.ts", import.meta.url).href;
-  // Simulate Windows open flags in a child so this protection is exercised on every CI OS.
   const script = `
     import assert from 'node:assert/strict';
     import fs from 'node:fs';
@@ -688,12 +687,14 @@ test("document imports reject symlinks when the platform cannot enforce O_NOFOLL
 
 test("clone uses a new destination and removal leaves the clone on disk", async (t) => {
   const f = await fixture(t);
-  await run("git", ["init", f.source]);
-  await writeFile(join(f.source, "flight.c"), "controller\n");
-  await run("git", ["-C", f.source, "add", "flight.c"]);
+  const source = join(f.source, "local repository");
+  await mkdir(source);
+  await run("git", ["init", source]);
+  await writeFile(join(source, "flight.c"), "controller\n");
+  await run("git", ["-C", source, "add", "flight.c"]);
   await run("git", [
     "-C",
-    f.source,
+    source,
     "-c",
     "user.name=Test",
     "-c",
@@ -702,15 +703,15 @@ test("clone uses a new destination and removal leaves the clone on disk", async 
     "-m",
     "fixture",
   ]);
-  const destination = join(f.root, "clone");
+  const destination = join(f.root, "clone with spaces");
   const clone = await f.call<Repository>("repositories.clone", {
-    url: f.source,
+    url: source,
     destination,
   });
   assert.equal(clone.path, await realpath(destination));
   assert.match(clone.revision ?? "", /^[a-f0-9]{40}$/u);
   await assert.rejects(
-    f.call("repositories.clone", { url: f.source, destination }),
+    f.call("repositories.clone", { url: source, destination }),
     /already exists/u,
   );
   await assert.rejects(
@@ -849,7 +850,7 @@ test(
 
 test("source context excludes credentials consistently while retaining environment templates", async (t) => {
   const f = await fixture(t);
-  for (const directory of [".ssh", ".aws"]) {
+  for (const directory of [".ssh", ".aws", ".GIT", ".Hg", ".SvN"]) {
     await mkdir(join(f.source, directory));
     await writeFile(join(f.source, directory, "config"), "CANARY_SECRET");
   }
@@ -884,10 +885,17 @@ test("source context excludes credentials consistently while retaining environme
     ).hits,
     [],
   );
-  for (const path of [".env", ".aws/config", "private.pem"]) {
+  for (const path of [
+    ".env",
+    ".aws/config",
+    "private.pem",
+    ".GIT/config",
+    ".Hg/config",
+    ".SvN/config",
+  ]) {
     await assert.rejects(
       f.call("repositories.read", { repositoryId: f.repository.id, path }),
-      /Credential/u,
+      /Credential|Version-control/u,
     );
     const system = model();
     system.components[0]!.evidence.push({
@@ -897,7 +905,7 @@ test("source context excludes credentials consistently while retaining environme
     });
     await assert.rejects(
       f.call("system.save", { system, expectedRevision: 0 }),
-      /Credential/u,
+      /Credential|Version-control/u,
     );
   }
   assert.equal(

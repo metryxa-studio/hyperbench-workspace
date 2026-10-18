@@ -166,6 +166,14 @@ test("rendering rejects invalid page, scale, crop, document type, and output siz
     }
     await writeFile(path, pdfFixture(1, 5000, 5000));
     await assert.rejects(renderDocumentPage(path, 1, 1), /4096 pixels/);
+    const crop = await renderDocumentPage(path, 1, 2, {
+      x: 0.5,
+      y: 0.5,
+      width: 0.1,
+      height: 0.1,
+    });
+    assert.equal(crop.width, 1000);
+    assert.equal(crop.height, 1000);
     await writeFile(path, "plain text");
     await assert.rejects(renderDocumentPage(path, 1), /PDF documents only/);
   } finally {

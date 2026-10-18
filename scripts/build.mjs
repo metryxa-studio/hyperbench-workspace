@@ -1,6 +1,6 @@
 import { build } from "esbuild";
 import { build as viteBuild } from "vite";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 await mkdir("dist", { recursive: true });
 await build({
   entryPoints: ["src/cli.ts"],

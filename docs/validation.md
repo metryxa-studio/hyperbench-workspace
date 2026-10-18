@@ -1,74 +1,16 @@
 # Validation
 
-## Unreleased — SSH test benches
-
-TypeScript and the production build pass. The full backend suite passes all 59 tests, including the opt-in real SSH integration. Protocol checks cover project isolation, disabled-bench errors, command and timeout bounds, remote tool annotations, inclusion in project context, and authentication/origin requirements for all six browser bench methods. MCP exposes listing, connection testing, and execution; it exposes no bench registration, settings, or enablement tool.
-
-The real SSH check used a disposable loopback SSH server with locally generated keys and host trust material kept outside the repository. It verified the fixed connection probe, command stdout/stderr and exit code 7 through a real stdio MCP client, a one-second timeout, the combined 256 KiB output cap, and rejection of an untrusted host key. These checks confirm SSH and protocol behavior, not attached hardware behavior. All 21 Chromium workflows also pass, including bench creation/edit/removal, disabled-by-default commands, connection probes, execution and output-limit status, narrow layouts, and an in-flight command during project switching. The running browser was also used to probe a real local SSH target and run the simulated diagnostic successfully.
-
-To reproduce the optional SSH integration, prepare a disposable local SSH target and a JSON connection file outside the repository with `host`, `port`, `username`, `identityFile`, and `knownHostsFile`. Use absolute paths to the identity and prepared host trust file, and keep keys and user-specific connection settings outside the repository. The target needs a POSIX shell with `printf`, `uname`, `hostname`, `pwd`, `sleep`, and `yes`.
-
-```sh
-HYPERBENCH_SSH_TEST_CONFIG=/absolute/path/connection.json npm test
-```
-
-Without this environment variable, `npm test` skips the real SSH integration. The test uses temporary workspace state and does not configure or start the SSH server.
-
-## Unreleased — system views and editing
-
-Diagram now shows hardware only, using 22 px chip icons with 40 px hit targets. Names appear on hover, focus, or selection. Hardware and Software retain detailed cards. The External tab and type options are removed; existing stored components and links remain intact. Mixed-type connections can be inspected through a component's Connections list without putting software cards on the physical diagram. The “Agent drafts” label is unchanged.
-
-After integrating the SSH test-bench update, the production build, TypeScript check, and all 22 Chromium workflows pass. The backend suite passes 58 tests; its optional real-SSH integration is skipped without connection settings. The new browser checks verify symbol sizing, keyboard name disclosure, available type options, mixed-type connection creation and inspection, and unchanged hidden components/links after save and reload. Manual browser checks exercised the hardware symbol, connection inspector, and separate Software view.
-
-The earlier view/editing update passed TypeScript, the production build, 46 backend tests, and 19 Chromium workflows. Those browser checks cover visible Hardware/Software switching, type-specific empty states, fitting widely separated components, component creation in the selected view, and cross-type connection edits. All seven outline labels and their dropdown arrows remain within the control at a 390 px viewport width.
-
-The added save checks exercise real keystrokes in port lists, shortcut saves, removed port references, constrained endpoint choices, canceled draft acceptance, and read-only draft previews. Concurrent-save tests verify that an external update refreshes a clean browser but never replaces pending edits, including when its response arrives after editing starts. Browser clicks also exercised the final dropdown, view switching, component creation, and connection-port selection in an isolated local workspace.
-
-These source changes have not been published to npm. The registry release remains 0.1.0; the existing 0.1.1 GitHub archive predates these fixes.
-
-## 0.1.1 — diagram outlines
-
-The outline update passes TypeScript, 46 backend tests on Node 22 and 26, and 11 Chromium workflows. The added checks cover all seven layout choices, save/reload/discard, unchanged graph and evidence links, read-only draft previews, panning and node dragging, and fitting every outline in a 390 px viewport. Drone, robot-arm, and truck artwork was also inspected in the browser. An independent code review found no introduced issues.
-
-The new choices require no database migration. Existing blank, quadrotor, and hexarotor values retain their meaning. Outlines are decorative and do not create inferred connections.
-
-## 0.1.0 — initial release
-
-Release checks for 0.1.0, run on 17 October 2026. These results describe the checks performed, not a guarantee that every agent client or hardware design is supported.
+Checks run on 18 October 2026 for the current source tree. These results cover the tested paths, not a guarantee that every client or hardware target works.
 
 | Check | Result |
 | --- | --- |
-| TypeScript | `npm run check` passes. |
-| Core, HTTP, MCP and real stdio integration | 44 tests pass on macOS with Node 22 and Node 26. |
-| Chromium workflows | 8 tests pass, including a 390 px layout. |
-| Production build | CLI/server bundle and browser assets build successfully. |
-| Fresh package | Install, doctor, skill copying, browser API, MCP reads and explicit draft acceptance pass from a temporary directory containing spaces. |
-| npm release | Registry installation of `hyperbench-workspace@0.1.0` passes the package checks on Node 22 and Node 26. A global install by the short name also launches the `hyperbench` executable successfully. The published archive matches the tested GitHub release. |
-| Dependency audit | No known vulnerabilities reported by `npm audit --omit=dev` at check time. |
-| Skill format | All three `SKILL.md` files pass the skill format validator. |
+| TypeScript and production build | Pass. |
+| Backend, HTTP, and MCP | 58 pass; the optional live-SSH test is skipped without a disposable target. |
+| Chromium workflows | 31 pass, including narrow layouts, delayed responses, partial failures, persistence, and reconnecting. |
+| Fresh package install | Startup, paths with spaces, skills, browser APIs, MCP, and explicit draft acceptance pass on Node 26. |
+| Runtime dependency audit | No known vulnerabilities reported at check time. |
 
-The automated browser tests cover project creation and persistence, local repository reading/search, document upload/link/removal, agent draft review, stale-save rejection, PDF images/text/download integrity, optional connection ports, and narrow-window navigation. Browser clicks also exercised the real PX4 project, Pixracer schematic pages, and connection setup.
-
-The backend suite checks project boundaries, traversal and symlink rejection, binary/credential exclusions, bounded reads and responses, concurrent saves across processes, safe deletion, document rendering, missing blobs, Git clone behavior, HTTP authentication/origins, and interrupted-request shutdown. Symlink tests also disable `O_NOFOLLOW` to exercise platforms where the flag is unavailable. FIFO checks run only on POSIX.
-
-## Real repository and document check
-
-An existing local PX4 checkout was registered in an isolated workspace. Its original files were not modified.
-
-| Operation | Observed time |
-| --- | ---: |
-| Register the already-cloned checkout | 8 ms |
-| Bounded source search, three returned matches | 471 ms |
-| Import and extract the five-page Pixracer PDF | 412 ms |
-| Render a page-five connector crop | 36 ms |
-
-The search reported truncation; this is not a complete-repository recall benchmark. Registration timing excludes Git download. Source reading returned the 78-line `msg/versioned/BatteryStatus.msg`. The page-five image was visually inspected for connector names, labels, and pin numbers. No OCR or electrical-net inference was claimed.
-
-## Skills and provenance review
-
-An independent reviewer compared all three skill texts with 11 selected documents from the requested reference repositories: workersio/skills, Seahan1/hardware-agency-agents, 0sec-labs/0, and greptileai/skills. The comparison found no shared normalized sequence of five or more words. This is a scoped originality check, not proof of uniqueness against every published document. Skill prose was written for this tool; third-party license notices retain their required wording.
-
-A separate temporary firmware-parser scenario exercised source/document retrieval, diagnosis, and focused regression review. The base parser passed 589,824 generated cases. A changed parser reproduced a signedness failure with a four-byte frame: `54 00 80 d4`. The expected value was −327.68 °C; the changed parser returned +327.68 °C. That was a synthetic host-side test, not a physical hardware result or a live GitHub PR.
+The browser suite covers projects, system editing, outlines, evidence links, document import/render/download, repository reads/search, draft review, concurrent saves, agent configuration, and bench settings/command results. The backend suite checks filesystem boundaries, credential exclusions, bounded responses, malformed input, project isolation, revision conflicts across processes, stdio MCP, and interrupted requests. SSH process tests use a controlled executable to verify arguments, timeouts, and output limits.
 
 ## Reproduce
 
@@ -81,9 +23,26 @@ npx playwright install chromium
 npm run test:ui
 npm pack
 node scripts/verify-package.mjs hyperbench-workspace-0.1.1.tgz
-node scripts/verify-package.mjs --registry hyperbench-workspace@0.1.0
 ```
 
-The package check installs into a temporary folder and removes it afterward. It requires package-registry access. The GitHub workflow also runs the backend matrix on Linux, macOS and Windows with Node 22/24, plus Chromium on Linux; consult that run for platform results.
+The package verifier installs into a temporary directory containing spaces and checks startup, skills, browser APIs, MCP reads, and draft acceptance. It requires registry access and removes its temporary installation afterward. Tests, screenshots, traces, temporary user state, and dependencies are excluded from the published package.
 
-The real stdio tests use an independent MCP SDK client process. No claim is made that every named desktop agent was installed or authenticated during this release check. Automatic OCR, background indexing, and model execution are outside this package. The historical release checks above predate the SSH bench feature.
+The GitHub Check workflow runs backend/build checks on Linux, macOS, and Windows with Node 22/24, plus Chromium on Linux. Consult the workflow run for results on a specific commit.
+
+## Optional live SSH check
+
+Prepare a disposable SSH target and a JSON file outside the repository containing `host`, `port`, `username`, `identityFile`, and `knownHostsFile`. Use absolute paths for the key and verified host-trust file. The target needs a POSIX shell with `printf`, `uname`, `hostname`, `pwd`, `sleep`, and `yes`.
+
+```sh
+HYPERBENCH_SSH_TEST_CONFIG=/absolute/path/connection.json npm test
+```
+
+This checks a connection probe, remote output and exit status, timeout/output limits, and host-key rejection through a real MCP client. It does not establish hardware health or guarantee remote processes stop after an SSH timeout.
+
+## Release and scope
+
+The npm registry remains at 0.1.0. Current source changes are not published there; the existing 0.1.1 GitHub archive also predates these fixes. Build from the current source to use them.
+
+All three skills were written for this tool. An independent comparison with 11 selected reference documents found no shared normalized sequence of five or more words. That is a scoped review, not a claim of uniqueness against every published document. Required license notices remain intact.
+
+Automatic OCR, code indexing, and model execution are outside this package. Agents retain their own model, permissions, and approval policies. A passing stdio MCP check does not establish compatibility with every desktop agent client.

@@ -8,6 +8,8 @@ Connect repositories, PDFs, a system diagram, and SSH test benches. Your agent c
 
 ## Install
 
+The current branch includes fixes newer than the npm release. Use [Build from source](#build-from-source) to run them before the next package release.
+
 Requires **Node.js 22.13+** (a current LTS release is recommended). Git is needed to clone repositories; existing folders and documents can be used without it. Test benches additionally require an OpenSSH-compatible `ssh` executable on your PATH.
 
 ```sh
@@ -36,7 +38,7 @@ npm install -g hyperbench-workspace@latest
 hyperbench start
 ```
 
-Reconnect your agent to restart its MCP process with the updated package. Your local projects and documents stay in the data directory. Updates are published as new versions; existing installations do not update automatically. To install a specific version, use `hyperbench-workspace@0.1.1` instead.
+Reconnect your agent to restart its MCP process with the updated package. Your local projects and documents stay in the data directory. Updates are published as new versions; existing installations do not update automatically. To install a specific version, use a published version such as `hyperbench-workspace@0.1.0`.
 
 ## First project
 

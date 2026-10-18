@@ -20,19 +20,36 @@ type BenchSettings = Pick<
   | "enabled"
 >;
 
-function text(value: unknown, label: string, maximum: number, empty = false): string {
+function text(
+  value: unknown,
+  label: string,
+  maximum: number,
+  empty = false,
+): string {
   if (
     typeof value !== "string" ||
     value.length > maximum ||
     (!empty && !value.trim()) ||
     value.includes("\0")
   )
-    throw new Error(`${label} must be ${empty ? "text" : "nonempty text"} of at most ${maximum} characters.`);
+    throw new Error(
+      `${label} must be ${empty ? "text" : "nonempty text"} of at most ${maximum} characters.`,
+    );
   return value;
 }
 
-function integer(value: unknown, label: string, min: number, max: number): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < min || value > max)
+function integer(
+  value: unknown,
+  label: string,
+  min: number,
+  max: number,
+): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < min ||
+    value > max
+  )
     throw new Error(`${label} must be an integer between ${min} and ${max}.`);
   return value;
 }
@@ -40,19 +57,24 @@ function integer(value: unknown, label: string, min: number, max: number): numbe
 function localFile(value: unknown, label: string): string | undefined {
   if (value === undefined || value === "") return undefined;
   let path = text(value, label, 4096);
-  // OpenSSH expands % tokens and environment references itself, even without a shell.
   if (/[\x00-\x1f\x7f%]/u.test(path) || path.includes("${"))
-    throw new Error(`${label} must not contain control characters or SSH expansion tokens.`);
+    throw new Error(
+      `${label} must not contain control characters or SSH expansion tokens.`,
+    );
   if (path.startsWith("~/")) path = join(homedir(), path.slice(2));
   if (!isAbsolute(path))
-    throw new Error(`${label} must be an absolute local path or start with ~/.`);
+    throw new Error(
+      `${label} must be an absolute local path or start with ~/.`,
+    );
   return normalize(path);
 }
 
 export function benchSettings(args: Args): BenchSettings {
   const host = text(args.host, "SSH host", 253).trim();
   if (!isIP(host) && !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/u.test(host))
-    throw new Error("SSH host must be a hostname, IP address, or SSH-config alias, without a username, port, or shell characters.");
+    throw new Error(
+      "SSH host must be a hostname, IP address, or SSH-config alias, without a username, port, or shell characters.",
+    );
   let username: string | undefined;
   if (args.username !== undefined && args.username !== "") {
     username = text(args.username, "SSH username", 64);
@@ -63,9 +85,13 @@ export function benchSettings(args: Args): BenchSettings {
     throw new Error("Bench enabled must be a boolean.");
   return {
     name: text(args.name, "Bench name", 200).trim(),
-    description: args.description === undefined ? "" : text(args.description, "Bench description", 20_000, true),
+    description:
+      args.description === undefined
+        ? ""
+        : text(args.description, "Bench description", 20_000, true),
     host,
-    port: args.port === undefined ? 22 : integer(args.port, "SSH port", 1, 65535),
+    port:
+      args.port === undefined ? 22 : integer(args.port, "SSH port", 1, 65535),
     username,
     identityFile: localFile(args.identityFile, "SSH identity file"),
     knownHostsFile: localFile(args.knownHostsFile, "SSH known-hosts file"),
@@ -74,7 +100,12 @@ export function benchSettings(args: Args): BenchSettings {
 }
 
 export function benchRevision(value: unknown): number {
-  return integer(value, "Expected bench revision", 0, Number.MAX_SAFE_INTEGER - 1);
+  return integer(
+    value,
+    "Expected bench revision",
+    0,
+    Number.MAX_SAFE_INTEGER - 1,
+  );
 }
 
 function sshArguments(bench: TestBench, command: string): string[] {
@@ -108,11 +139,18 @@ function sshArguments(bench: TestBench, command: string): string[] {
     "LogLevel=ERROR",
   ];
   if (bench.knownHostsFile) {
-    // OpenSSH parses this option as a whitespace-separated list; quote one literal path.
-    const path = bench.knownHostsFile.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+    const path = bench.knownHostsFile
+      .replaceAll("\\", "\\\\")
+      .replaceAll('"', '\\"');
     options.push(`UserKnownHostsFile="${path}"`);
   }
-  const args = ["-T", "-n", ...options.flatMap((option) => ["-o", option]), "-p", String(bench.port)];
+  const args = [
+    "-T",
+    "-n",
+    ...options.flatMap((option) => ["-o", option]),
+    "-p",
+    String(bench.port),
+  ];
   if (bench.username) args.push("-l", bench.username);
   if (bench.identityFile) args.push("-i", bench.identityFile);
   args.push("--", bench.host, command);
@@ -123,8 +161,6 @@ function boundedText(text: string, maximum: number): string {
   const encoded = Buffer.from(text, "utf8");
   return new StringDecoder("utf8").write(encoded.subarray(0, maximum));
 }
-
-/** Uses the user's trusted OpenSSH configuration and key agent; never invokes a local shell. */
 export async function runBenchCommand(
   bench: TestBench,
   value: unknown,
@@ -141,9 +177,15 @@ export async function runBenchCommand(
       detached: process.platform !== "win32",
       windowsHide: true,
     });
-    const stdout: Buffer[] = [], stderr: Buffer[] = [];
-    let bytes = 0, timedOut = false, truncated = false, stopping = false, settled = false;
-    let exitCode: number | null = null, signal: string | null = null;
+    const stdout: Buffer[] = [],
+      stderr: Buffer[] = [];
+    let bytes = 0,
+      timedOut = false,
+      truncated = false,
+      stopping = false,
+      settled = false;
+    let exitCode: number | null = null,
+      signal: string | null = null;
     let forceTimer: ReturnType<typeof setTimeout> | undefined;
     const deadline = setTimeout(() => {
       timedOut = true;
@@ -155,9 +197,7 @@ export async function runBenchCommand(
       try {
         if (process.platform !== "win32") process.kill(-child.pid, kind);
         else child.kill(kind);
-      } catch {
-        // It may already have exited between the deadline and the signal.
-      }
+      } catch {}
     }
     function finish(): void {
       if (settled) return;
@@ -166,11 +206,16 @@ export async function runBenchCommand(
       if (forceTimer) clearTimeout(forceTimer);
       const decodedOut = Buffer.concat(stdout).toString("utf8");
       const decodedErr = Buffer.concat(stderr).toString("utf8");
-      // Invalid UTF-8 becomes replacement characters, which can exceed the raw byte cap.
-      if (Buffer.byteLength(decodedOut) + Buffer.byteLength(decodedErr) > MAX_BENCH_OUTPUT_BYTES)
+      if (
+        Buffer.byteLength(decodedOut) + Buffer.byteLength(decodedErr) >
+        MAX_BENCH_OUTPUT_BYTES
+      )
         truncated = true;
       const out = boundedText(decodedOut, MAX_BENCH_OUTPUT_BYTES);
-      const err = boundedText(decodedErr, MAX_BENCH_OUTPUT_BYTES - Buffer.byteLength(out));
+      const err = boundedText(
+        decodedErr,
+        MAX_BENCH_OUTPUT_BYTES - Buffer.byteLength(out),
+      );
       resolve({
         benchId: bench.id,
         command,
@@ -188,7 +233,6 @@ export async function runBenchCommand(
       stopping = true;
       kill("SIGTERM");
       forceTimer = setTimeout(() => {
-        // Kill the process group too, including any configured SSH proxy process.
         kill("SIGKILL");
         child.stdout.destroy();
         child.stderr.destroy();
@@ -215,7 +259,11 @@ export async function runBenchCommand(
       settled = true;
       clearTimeout(deadline);
       if (forceTimer) clearTimeout(forceTimer);
-      reject(new Error("OpenSSH could not start. Install the ssh command and ensure it is available on PATH."));
+      reject(
+        new Error(
+          "OpenSSH could not start. Install the ssh command and ensure it is available on PATH.",
+        ),
+      );
     });
     child.once("close", (code, closedSignal) => {
       exitCode = code;

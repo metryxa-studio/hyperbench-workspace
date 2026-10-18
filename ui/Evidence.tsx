@@ -202,9 +202,13 @@ export function EvidencePreview({
 }) {
   const [text, setText] = useState(""),
     [error, setError] = useState(""),
-    [loading, setLoading] = useState(true);
+    [loading, setLoading] = useState(true),
+    [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let active = true;
+    setLoading(true);
+    setError("");
+    setText("");
     void (async () => {
       try {
         const result =
@@ -214,7 +218,11 @@ export function EvidencePreview({
                 repositoryId: item.repositoryId,
                 path: item.path,
                 startLine: item.line || 1,
-                endLine: item.endLine || (item.line ? item.line + 30 : 100),
+                endLine: Math.min(
+                  item.endLine || (item.line ? item.line + 30 : 100),
+                  (item.line || 1) + 1999,
+                  10_000_000,
+                ),
               })
             : await call<DocumentContent>("documents.read", {
                 projectId: project.id,
@@ -227,13 +235,15 @@ export function EvidencePreview({
               ? result.pages
                   .map((p) => `Page ${p.page}\n\n${p.text}`)
                   .join("\n\n")
-              : result.text
-                  .split("\n")
-                  .map(
-                    (line, index) =>
-                      `${String(result.startLine + index).padStart(4)}  ${line}`,
-                  )
-                  .join("\n"),
+              : result.totalLines === 0
+                ? "Empty file."
+                : `Lines ${result.startLine}–${result.endLine} of ${result.totalLines}\n\n${result.text
+                    .split("\n")
+                    .map(
+                      (line, index) =>
+                        `${String(result.startLine + index).padStart(4)}  ${line}`,
+                    )
+                    .join("\n")}`,
           );
       } catch (e) {
         if (active) setError(message(e));
@@ -244,7 +254,7 @@ export function EvidencePreview({
     return () => {
       active = false;
     };
-  }, [item, project.id]);
+  }, [item, project.id, attempt]);
   return (
     <Modal title="Evidence preview" onClose={onClose} wide>
       <p className="context-filename">
@@ -264,6 +274,11 @@ export function EvidencePreview({
         <blockquote className="agent-prompt">{item.excerpt}</blockquote>
       )}
       <footer className="modal-actions">
+        {error && (
+          <Button onClick={() => setAttempt((value) => value + 1)}>
+            Retry preview
+          </Button>
+        )}
         <Button onClick={onClose}>Close</Button>
       </footer>
     </Modal>

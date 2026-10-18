@@ -30,7 +30,7 @@ const SKIP = new Set([
   ".next",
   ".cache",
   "__pycache__",
-  ".DS_Store",
+  ".ds_store",
 ]);
 const CREDENTIAL_DIRECTORIES = new Set([
   ".ssh",
@@ -106,7 +106,11 @@ export function relativeSourcePath(value: unknown): string {
     throw new Error(
       "Credential files are outside the source context. Use your own local tools if you need to inspect them.",
     );
-  if (value.split("/").some((part) => [".git", ".hg", ".svn"].includes(part)))
+  if (
+    value
+      .split("/")
+      .some((part) => [".git", ".hg", ".svn"].includes(part.toLowerCase()))
+  )
     throw new Error("Version-control metadata is outside the source context.");
   return value;
 }
@@ -126,8 +130,6 @@ export function checkRoot(root: string): void {
     );
   }
 }
-
-/** Reject symlink components and verify an opened regular file, including after opening. */
 export function openSource(root: string, path: string): number {
   checkRoot(root);
   const relativePath = relativeSourcePath(path);
@@ -203,7 +205,6 @@ async function sourceText(root: string, path: string): Promise<string> {
       throw new Error(
         `Source file exceeds the ${MAX_SOURCE_BYTES / 1024 / 1024} MiB read limit.`,
       );
-    // Reading from the verified descriptor prevents a replacement of the final path.
     const buffer = Buffer.alloc(MAX_SOURCE_BYTES + 1);
     let count = 0;
     while (count < buffer.length) {
@@ -246,7 +247,6 @@ async function* walk(
   let visited = 0;
   for (let index = 0; index < queue.length; index++) {
     const directory = queue[index]!;
-    // Do not follow a directory that changed into a symlink after enumeration.
     let location = root;
     let safe = true;
     for (const segment of directory.split("/").filter(Boolean)) {
@@ -279,7 +279,7 @@ async function* walk(
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
       if (
-        SKIP.has(entry.name) ||
+        SKIP.has(entry.name.toLowerCase()) ||
         credentialPath(entry.name) ||
         entry.isSymbolicLink() ||
         /[\\\x00-\x1f]/u.test(entry.name)
@@ -449,11 +449,8 @@ export async function repositoryDetails(
       { timeout: 10_000, maxBuffer: 64 * 1024 },
     );
     const [top, revision, branch] = result.stdout.trim().split("\n");
-    // A plain directory inside another repository is not itself a Git repository.
     if (top && (await realpath(top)) === path) return { revision, branch };
-  } catch {
-    /* Linking a regular non-Git directory is supported. */
-  }
+  } catch {}
   return {};
 }
 
@@ -480,7 +477,8 @@ export async function cloneRepository(
     typeof url !== "string" ||
     !url ||
     url.length > 4096 ||
-    /[\x00-\x20]/u.test(url) ||
+    /[\x00-\x1f\x7f]/u.test(url) ||
+    (!isAbsolute(url) && url.includes(" ")) ||
     url.startsWith("-")
   )
     throw new Error(

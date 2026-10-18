@@ -9,6 +9,7 @@ import { createReadStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import path from "node:path";
 import type { Args } from "./types.js";
+import { openSource } from "./core/repositories.js";
 
 export interface BrowserWorkspace {
   call(method: string, args: Args): Promise<unknown>;
@@ -179,7 +180,11 @@ export async function startBrowserServer(
             "Content-Disposition",
             `attachment; filename*=UTF-8''${encodeURIComponent(file.name).replace(/'/g, "%27")}`,
           );
-          await pipeline(createReadStream(file.path), response);
+          const fd = openSource(
+            path.dirname(file.path),
+            path.basename(file.path),
+          );
+          await pipeline(createReadStream(file.path, { fd }), response);
           return;
         }
         json(response, 404, { error: "Unknown endpoint." });
@@ -240,7 +245,6 @@ export async function startBrowserServer(
   let closing: Promise<void> | undefined;
   const close = () =>
     (closing ??= new Promise<void>((resolve, reject) => {
-      // An unfinished upload must not hold Ctrl+C open for the five-minute request timeout.
       const deadline = setTimeout(() => server.closeAllConnections(), 1000);
       deadline.unref();
       server.close((error) => {

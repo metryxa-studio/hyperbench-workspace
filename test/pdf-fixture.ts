@@ -1,4 +1,3 @@
-// A small valid PDF fixture, generated locally without additional PDF dependencies.
 export function pdfFixture(pageCount = 1, width = 200, height = 100): Buffer {
   const content =
     "1 0 0 rg 0 0 100 100 re f\n0 0 0 rg BT /F1 8 Tf 110 50 Td (Hardware context) Tj ET";

@@ -40,7 +40,6 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "esbuild": "^0.28.2",
-    "lucide-react": "1.53.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "tsx": "^4.20.0",

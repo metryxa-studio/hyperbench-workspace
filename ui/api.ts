@@ -4,6 +4,10 @@ if (freshToken) {
   sessionStorage.setItem("hyperbench.token", freshToken);
   history.replaceState(null, "", location.pathname + location.search);
 }
+window.addEventListener("hashchange", () => {
+  if (new URLSearchParams(window.location.hash.slice(1)).get("token"))
+    window.location.reload();
+});
 export function authHeaders() {
   return {
     Authorization: `Bearer ${sessionStorage.getItem("hyperbench.token") || ""}`,

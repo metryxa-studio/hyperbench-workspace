@@ -239,10 +239,9 @@ export function RepositoryView({
                 ...item.evidence,
                 {
                   type: "source",
-                  repositoryId,
+                  repositoryId: source.repositoryId,
                   path: source.path,
-                  line: startLine,
-                  endLine,
+                  ...(source.totalLines ? { line: startLine, endLine } : {}),
                 },
               ],
             }
@@ -476,35 +475,40 @@ export function RepositoryView({
                   tabIndex={0}
                   aria-label={`Source of ${source.path}`}
                 >
-                  {source.text.split("\n").map((line, i) => (
-                    <div
-                      className={`code-line ${source.startLine + i >= startLine && source.startLine + i <= endLine ? "highlighted" : ""}`}
-                      key={i}
-                    >
-                      <button
-                        className="line-number"
-                        aria-label={`Select line ${source.startLine + i}`}
-                        onClick={(e) => {
-                          const n = source.startLine + i;
-                          if (e.shiftKey) {
-                            setStartLine(Math.min(startLine, n));
-                            setEndLine(Math.max(startLine, n));
-                          } else {
-                            setStartLine(n);
-                            setEndLine(n);
-                          }
-                        }}
+                  {!source.totalLines ? (
+                    <p>Empty file.</p>
+                  ) : (
+                    source.text.split("\n").map((line, i) => (
+                      <div
+                        className={`code-line ${source.startLine + i >= startLine && source.startLine + i <= endLine ? "highlighted" : ""}`}
+                        key={i}
                       >
-                        {source.startLine + i}
-                      </button>
-                      <code>{line || " "}</code>
-                    </div>
-                  ))}
+                        <button
+                          className="line-number"
+                          aria-label={`Select line ${source.startLine + i}`}
+                          onClick={(e) => {
+                            const n = source.startLine + i;
+                            if (e.shiftKey) {
+                              setStartLine(Math.min(startLine, n));
+                              setEndLine(Math.max(startLine, n));
+                            } else {
+                              setStartLine(n);
+                              setEndLine(n);
+                            }
+                          }}
+                        >
+                          {source.startLine + i}
+                        </button>
+                        <code>{line || " "}</code>
+                      </div>
+                    ))
+                  )}
                 </div>
                 <div className="source-footer">
                   <span>
-                    Lines {source.startLine}–{source.endLine} of{" "}
-                    {source.totalLines}
+                    {source.totalLines
+                      ? `Lines ${source.startLine}–${source.endLine} of ${source.totalLines}`
+                      : "0 lines"}
                   </span>
                   <div>
                     {source.startLine > 1 && (
@@ -639,28 +643,30 @@ export function RepositoryView({
                 ))}
               </select>
             </Field>
-            <div className="field-grid">
-              <Field label="Start line">
-                <input
-                  type="number"
-                  min="1"
-                  max={source.totalLines}
-                  value={startLine}
-                  onChange={(e) => setStartLine(+e.target.value)}
-                  required
-                />
-              </Field>
-              <Field label="End line">
-                <input
-                  type="number"
-                  min={startLine}
-                  max={source.totalLines}
-                  value={endLine}
-                  onChange={(e) => setEndLine(+e.target.value)}
-                  required
-                />
-              </Field>
-            </div>
+            {source.totalLines > 0 && (
+              <div className="field-grid">
+                <Field label="Start line">
+                  <input
+                    type="number"
+                    min="1"
+                    max={source.totalLines}
+                    value={startLine}
+                    onChange={(e) => setStartLine(+e.target.value)}
+                    required
+                  />
+                </Field>
+                <Field label="End line">
+                  <input
+                    type="number"
+                    min={startLine}
+                    max={source.totalLines}
+                    value={endLine}
+                    onChange={(e) => setEndLine(+e.target.value)}
+                    required
+                  />
+                </Field>
+              </div>
+            )}
             <footer className="modal-actions">
               <Button type="button" onClick={() => setModal(null)}>
                 Cancel

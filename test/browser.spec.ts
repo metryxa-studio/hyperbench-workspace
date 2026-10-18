@@ -1394,6 +1394,19 @@ test("outline artwork does not block panning or dragging connected components", 
       Math.abs((await node.boundingBox())!.y - beforeDrag.y - 30),
     )
     .toBeLessThan(1);
+  const afterDrag = (await node.boundingBox())!;
+  await page.mouse.move(
+    afterDrag.x + afterDrag.width / 2,
+    afterDrag.y + afterDrag.height / 2,
+  );
+  await page.mouse.down();
+  await page.locator(".canvas").dispatchEvent("lostpointercapture");
+  await page.mouse.move(
+    afterDrag.x + afterDrag.width / 2 + 30,
+    afterDrag.y + afterDrag.height / 2 + 30,
+  );
+  await page.mouse.up();
+  expect(await node.boundingBox()).toEqual(afterDrag);
   await save(page);
   const saved = (await workspace.call("system.get", {
     projectId,
@@ -1406,7 +1419,438 @@ test("outline artwork does not block panning or dragging connected components", 
   expect(saved.links).toEqual(original.links);
 });
 
-test("test benches can be connected, enabled as tools, edited, and removed", async ({ page }, testInfo) => {
+test("agent configuration copy tracks the selected format and reports denied clipboard access", async ({
+  page,
+}) => {
+  await createProject(page);
+  await page.evaluate(() =>
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async () => {} },
+    }),
+  );
+  await page
+    .getByRole("button", { name: "Connect agent", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Copy", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Copied", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "JSON", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Copy", exact: true }),
+  ).toBeVisible();
+  await page.evaluate(() =>
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async () => {
+          throw new Error("Denied");
+        },
+      },
+    }),
+  );
+  await page.getByRole("button", { name: "Copy", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("copy it manually");
+});
+
+test("adding after panning stays visible and sparse diagrams fit completely", async ({
+  page,
+}) => {
+  const original = await seedConnectedSystem(page);
+  const canvas = page.locator(".canvas");
+  const rect = (await canvas.boundingBox())!;
+  for (let i = 0; i < 3; i++) {
+    await page.mouse.move(rect.x + 40, rect.y + 40);
+    await page.mouse.down();
+    await page.mouse.move(rect.x + rect.width - 50, rect.y + rect.height - 80, {
+      steps: 5,
+    });
+    await page.mouse.up();
+  }
+  await component(page, "Added after pan");
+  await expectNodeInsideCanvas(page, "Added after pan, hardware component");
+  await page.getByRole("button", { name: "Discard", exact: true }).click();
+  await workspace.call("system.save", {
+    projectId,
+    expectedRevision: original.revision,
+    system: {
+      ...original,
+      components: original.components.map((item, i) => ({
+        ...item,
+        x: i * 10000,
+        y: i * 10000,
+      })),
+    },
+  });
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Fit system to view", exact: true })
+    .click();
+  await expectNodeInsideCanvas(page, "Controller, hardware component");
+  await expectNodeInsideCanvas(page, "Temperature sensor, hardware component");
+  await page.getByRole("button", { name: "Zoom out", exact: true }).click();
+  await expectNodeInsideCanvas(page, "Controller, hardware component");
+  await expectNodeInsideCanvas(page, "Temperature sensor, hardware component");
+  await page.getByRole("button", { name: /^Hardware \d/ }).click();
+  const node = page.getByRole("button", {
+    name: "Controller, hardware component",
+    exact: true,
+  });
+  await node.press("Enter");
+  await page.getByLabel("X position", { exact: true }).fill("1000001");
+  await expect(page.getByLabel("X position", { exact: true })).toHaveValue(
+    "1000000",
+  );
+  await node.press("ArrowRight");
+  await expect(page.getByLabel("X position", { exact: true })).toHaveValue(
+    "1000000",
+  );
+  await save(page);
+});
+
+test("a fresh launch link reconnects an already-open expired session", async ({
+  page,
+}) => {
+  await page.goto(`${local.url.split("#")[0]}?reconnect#token=expired`);
+  await expect(page.getByRole("alert")).toContainText(
+    "Workspace access expired.",
+  );
+  await page.goto(local.url.replace("/#", "/?reconnect#"));
+  await expect(
+    page.getByRole("button", { name: "Create project", exact: true }),
+  ).toBeEnabled();
+  await expect(page).not.toHaveURL(/token=/);
+});
+
+test("startup waits for project state and offers a retry after failure", async ({
+  page,
+}) => {
+  let bootstrap: Route | undefined;
+  await page.route("**/api/call", async (route) => {
+    if (route.request().postDataJSON()?.method === "projects.list")
+      bootstrap = route;
+    else await route.continue();
+  });
+  await page.reload();
+  await expect.poll(() => !!bootstrap).toBe(true);
+  await expect(page.locator(".project-switcher")).toBeDisabled();
+  await bootstrap!.fulfill({
+    status: 503,
+    json: { error: "Temporary startup failure" },
+  });
+  await expect(
+    page.getByRole("button", { name: "Create project", exact: true }),
+  ).toBeDisabled();
+  await expect(page.getByRole("alert")).toContainText(
+    "Temporary startup failure",
+  );
+  await page.unroute("**/api/call");
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await createProject(page);
+});
+
+test("late deletion and creation responses preserve edits in the selected project", async ({
+  page,
+}) => {
+  await createProject(page);
+  await workspace.call("projects.create", { name: "Second project" });
+  await page.reload();
+  let pending: Route | undefined;
+  await page.route("**/api/call", async (route) => {
+    if (
+      ["projects.delete", "projects.create"].includes(
+        route.request().postDataJSON()?.method,
+      )
+    )
+      pending = route;
+    else await route.continue();
+  });
+  await page.locator(".project-switcher").click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByRole("button", {
+      name: "Delete project Flight controller",
+      exact: true,
+    })
+    .click();
+  await expect.poll(() => !!pending).toBe(true);
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /^S Second project/ })
+    .click();
+  await component(page, "Unsaved second board");
+  await pending!.continue();
+  pending = undefined;
+  await expect(page.locator(".project-switcher")).toContainText(
+    "Second project",
+  );
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
+    "Unsaved second board",
+  );
+  await save(page);
+  await page.locator(".project-switcher").click();
+  await expect(
+    page.getByRole("button", {
+      name: "Delete project Flight controller",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await page.getByLabel("New project name").fill("Late project");
+  await page
+    .getByRole("button", { name: "Create project", exact: true })
+    .click();
+  await expect.poll(() => !!pending).toBe(true);
+  await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+  await page.getByLabel("Name", { exact: true }).fill("Keep this edit");
+  const confirmation = page.waitForEvent("dialog");
+  await pending!.continue();
+  await (await confirmation).dismiss();
+  await expect(page.locator(".project-switcher")).toContainText(
+    "Second project",
+  );
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
+    "Keep this edit",
+  );
+});
+
+test("concurrent project deletions do not restore removed rows", async ({
+  page,
+}) => {
+  await createProject(page);
+  await workspace.call("projects.create", { name: "Second project" });
+  await workspace.call("projects.create", { name: "Third project" });
+  await page.reload();
+  const pending: Route[] = [];
+  await page.route("**/api/call", async (route) => {
+    if (route.request().postDataJSON()?.method === "projects.delete")
+      pending.push(route);
+    else await route.continue();
+  });
+  await page.locator(".project-switcher").click();
+  for (const name of ["Second project", "Third project"]) {
+    page.once("dialog", (dialog) => dialog.accept());
+    await page
+      .getByRole("button", { name: `Delete project ${name}`, exact: true })
+      .click();
+  }
+  await expect.poll(() => pending.length).toBe(2);
+  for (const [index, name] of ["Second project", "Third project"].entries()) {
+    await pending[index].continue();
+    await expect(
+      page.getByRole("button", { name: `Delete project ${name}`, exact: true }),
+    ).toHaveCount(0);
+  }
+  await expect(page.locator(".project-row")).toHaveCount(1);
+});
+
+test("document batches continue after invalid files and PDF text does not wait for rendering", async ({
+  page,
+}) => {
+  await createProject(page);
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: /Documents/ })
+    .click();
+  await page.getByLabel("Upload documents").setInputFiles([
+    {
+      name: "first.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("First document"),
+    },
+    {
+      name: "bad.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("not a PDF"),
+    },
+    {
+      name: "last.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Last document"),
+    },
+  ]);
+  await expect(page.locator(".document-text")).toContainText("Last document");
+  await expect(page.getByText(/bad.pdf:/).first()).toBeVisible();
+  expect(
+    ((await workspace.call("documents.list", { projectId })) as any[])
+      .map((item) => item.name)
+      .sort(),
+  ).toEqual(["first.txt", "last.txt"]);
+  let render: Route | undefined;
+  await page.route("**/api/call", async (route) => {
+    if (route.request().postDataJSON()?.method === "documents.page")
+      render = route;
+    else await route.continue();
+  });
+  await page.getByLabel("Upload documents").setInputFiles({
+    name: "board.pdf",
+    mimeType: "application/pdf",
+    buffer: pdfFixture(1),
+  });
+  await expect.poll(() => !!render).toBe(true);
+  await page
+    .getByRole("button", { name: "Extracted text", exact: true })
+    .click();
+  await expect(page.locator(".document-text")).toContainText(
+    "Hardware context",
+  );
+  await render!.fulfill({
+    status: 500,
+    json: { error: "Transient render failure" },
+  });
+  await page.getByRole("button", { name: "Page view", exact: true }).click();
+  await expect(
+    page.getByText("Transient render failure", { exact: true }),
+  ).toBeVisible();
+  await page.unroute("**/api/call");
+  await page
+    .getByRole("button", { name: "Retry page preview", exact: true })
+    .click();
+  await expect(
+    page.getByRole("img", { name: "Page 1 of board.pdf" }),
+  ).toBeVisible();
+});
+
+test("long source evidence previews a bounded range and empty files attach without fictitious lines", async ({
+  page,
+}) => {
+  const original = await seedConnectedSystem(page);
+  const repository = (
+    (await workspace.call("repositories.list", { projectId })) as any[]
+  )[0];
+  await writeFile(
+    path.join(repository.path, "long.txt"),
+    Array.from({ length: 3000 }, (_, i) => `source ${i + 1}`).join("\n"),
+  );
+  await writeFile(path.join(repository.path, "empty.txt"), "");
+  await workspace.call("system.save", {
+    projectId,
+    expectedRevision: original.revision,
+    system: {
+      ...original,
+      components: original.components.map((item, i) =>
+        i
+          ? item
+          : {
+              ...item,
+              evidence: [
+                {
+                  type: "source",
+                  repositoryId: repository.id,
+                  path: "long.txt",
+                  line: 1,
+                  endLine: 3000,
+                },
+              ],
+            },
+      ),
+    },
+  });
+  await page.reload();
+  await page
+    .getByRole("button", {
+      name: "Controller, hardware component",
+      exact: true,
+    })
+    .click();
+  await page.getByRole("button", { name: /long.txt:1–3000/ }).click();
+  await expect(page.getByRole("dialog")).toContainText("Lines 1–2000 of 3000");
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: /Repositories/ })
+    .click();
+  await page.getByRole("button", { name: "empty.txt", exact: true }).click();
+  await expect(page.getByLabel("Source of empty.txt")).toHaveText(
+    "Empty file.",
+  );
+  await expect(
+    page.getByRole("button", { name: "Select line 1", exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Attach to component", exact: true })
+    .click();
+  await expect(page.getByLabel("Start line", { exact: true })).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Attach evidence", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Save system", exact: true }).click();
+  await expect
+    .poll(
+      async () =>
+        ((await workspace.call("system.get", { projectId })) as SystemModel)
+          .components[0].evidence,
+    )
+    .toEqual([
+      {
+        type: "source",
+        repositoryId: repository.id,
+        path: "long.txt",
+        line: 1,
+        endLine: 3000,
+      },
+      { type: "source", repositoryId: repository.id, path: "empty.txt" },
+    ]);
+});
+
+test("failed document reads can be retried and deleting a document removes stale search results", async ({
+  page,
+}) => {
+  await createProject(page);
+  for (const name of ["unique.txt", "other.txt"])
+    await workspace.call("documents.upload", {
+      projectId,
+      name,
+      base64: Buffer.from(
+        name === "unique.txt" ? "Unique connector" : "Other document",
+      ).toString("base64"),
+    });
+  await page.reload();
+  let fail = true;
+  await page.route("**/api/call", async (route) => {
+    if (route.request().postDataJSON()?.method === "documents.read" && fail) {
+      fail = false;
+      await route.fulfill({
+        status: 503,
+        json: { error: "Temporary document read failure" },
+      });
+    } else await route.continue();
+  });
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: /Documents/ })
+    .click();
+  await expect(
+    page.getByText("Temporary document read failure", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Retry reading document", exact: true })
+    .click();
+  await expect(page.locator(".document-text")).not.toBeEmpty();
+  await page.getByLabel("Search documents", { exact: true }).fill("Unique");
+  await page
+    .getByRole("button", { name: "Search document text", exact: true })
+    .click();
+  await page
+    .locator(".document-search-results")
+    .getByRole("button", { name: /unique.txt/ })
+    .click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByRole("button", { name: "Delete document", exact: true })
+    .click();
+  await expect(page.locator(".document-search-results")).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Search document text", exact: true })
+    .click();
+  await expect(page.locator(".document-search-results")).toContainText(
+    "No matching text found.",
+  );
+});
+
+test("test benches can be connected, enabled as tools, edited, and removed", async ({
+  page,
+}, testInfo) => {
   await createProject(page);
   const requests: { method: string; args: Record<string, unknown> }[] = [];
   await page.route("**/api/call", async (route) => {
@@ -1420,8 +1864,14 @@ test("test benches can be connected, enabled as tools, edited, and removed", asy
       json: {
         result: {
           benchId: request.args.benchId,
-          command: request.args.command || "printf 'Hyperbench SSH connection OK'",
-          stdout: request.args.command === "big-output" ? "x".repeat(34_000) : request.method === "benches.test" ? "Hyperbench SSH connection OK\nLinux\n" : "<script>not executable markup</script>\nBench ready\n",
+          command:
+            request.args.command || "printf 'Hyperbench SSH connection OK'",
+          stdout:
+            request.args.command === "big-output"
+              ? "x".repeat(34_000)
+              : request.method === "benches.test"
+                ? "Hyperbench SSH connection OK\nLinux\n"
+                : "<script>not executable markup</script>\nBench ready\n",
           stderr: "",
           exitCode: 0,
           signal: null,
@@ -1433,84 +1883,179 @@ test("test benches can be connected, enabled as tools, edited, and removed", asy
     });
   });
   await page.getByRole("button", { name: /^Test benches/ }).click();
-  await expect(page.getByRole("heading", { name: "Bring your test bench into the workspace" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "Bring your test bench into the workspace",
+    }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Add your first test bench" }).click();
   await page.getByLabel("Bench name").fill("Motor bench");
-  await page.getByLabel("Description (optional)").fill("Motor controller and UART loopback");
+  await page
+    .getByLabel("Description (optional)")
+    .fill("Motor controller and UART loopback");
   await page.getByLabel("SSH host or config alias").fill("lab-bench");
   await expect(page.getByLabel("Port", { exact: true })).toHaveValue("22");
   await page.getByLabel("SSH username (optional)").fill("tester");
-  await page.getByText("SSH key and host verification", { exact: true }).click();
-  await page.getByLabel("Identity file (optional)").fill("~/.ssh/bench_ed25519");
-  await page.getByLabel("Known hosts file (optional)").fill("~/.ssh/bench_known_hosts");
-  const enable = page.getByRole("checkbox", { name: /^Enable remote commands for this bench/ });
+  await page
+    .getByText("SSH key and host verification", { exact: true })
+    .click();
+  await page
+    .getByLabel("Identity file (optional)")
+    .fill("~/.ssh/bench_ed25519");
+  await page
+    .getByLabel("Known hosts file (optional)")
+    .fill("~/.ssh/bench_known_hosts");
+  const enable = page.getByRole("checkbox", {
+    name: /^Enable remote commands for this bench/,
+  });
   await expect(enable).not.toBeChecked();
-  await page.getByRole("dialog").getByRole("button", { name: "Add test bench", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Motor bench", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Test benches/ })).toContainText("1");
-  await expect(page.getByRole("button", { name: "Run command", exact: true })).toBeDisabled();
-  await expect(page.getByLabel("Shell command", { exact: true })).toBeDisabled();
-  const added = (await workspace.call("benches.list", { projectId })) as TestBench[];
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Add test bench", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Motor bench", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /^Test benches/ }),
+  ).toContainText("1");
+  await expect(
+    page.getByRole("button", { name: "Run command", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByLabel("Shell command", { exact: true }),
+  ).toBeDisabled();
+  const added = (await workspace.call("benches.list", {
+    projectId,
+  })) as TestBench[];
   expect(added).toHaveLength(1);
-  expect(added[0]).toMatchObject({ name: "Motor bench", host: "lab-bench", port: 22, username: "tester", enabled: false });
+  expect(added[0]).toMatchObject({
+    name: "Motor bench",
+    host: "lab-bench",
+    port: 22,
+    username: "tester",
+    enabled: false,
+  });
   expect(added[0].knownHostsFile).toMatch(/\/\.ssh\/bench_known_hosts$/);
-  await page.getByRole("button", { name: "Test connection", exact: true }).click();
-  await expect(page.getByText("Connection successful", { exact: true })).toBeVisible();
+  await page
+    .getByRole("button", { name: "Test connection", exact: true })
+    .click();
+  await expect(
+    page.getByText("Connection successful", { exact: true }),
+  ).toBeVisible();
   expect(requests[0].method).toBe("benches.test");
-  await expect(page.getByRole("button", { name: "Run command", exact: true })).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Run command", exact: true }),
+  ).toBeDisabled();
 
   await page.getByRole("button", { name: "Edit bench", exact: true }).click();
-  await expect(page.getByLabel("SSH host or config alias")).toHaveValue("lab-bench");
+  await expect(page.getByLabel("SSH host or config alias")).toHaveValue(
+    "lab-bench",
+  );
   await page.getByLabel("Port", { exact: true }).fill("2222");
   await enable.check();
   await page.getByRole("button", { name: "Save bench", exact: true }).click();
-  await expect(page.getByText("Available to your agent", { exact: true })).toBeVisible();
-  await page.getByLabel("Shell command", { exact: true }).fill("printf 'Bench ready\\n'");
+  await expect(
+    page.getByText("Available to your agent", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByLabel("Shell command", { exact: true })
+    .fill("printf 'Bench ready\\n'");
   await page.getByLabel("Timeout (seconds)").fill("12");
   await page.getByRole("button", { name: "Run command", exact: true }).click();
-  await expect(page.getByText("Command completed", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("Standard output", { exact: true })).toContainText("<script>not executable markup</script>");
-  expect(requests[1]).toEqual({ method: "benches.execute", args: { projectId, benchId: added[0].id, command: "printf 'Bench ready\\n'", timeoutSeconds: 12 } });
+  await expect(
+    page.getByText("Command completed", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByLabel("Standard output", { exact: true }),
+  ).toContainText("<script>not executable markup</script>");
+  expect(requests[1]).toEqual({
+    method: "benches.execute",
+    args: {
+      projectId,
+      benchId: added[0].id,
+      command: "printf 'Bench ready\\n'",
+      timeoutSeconds: 12,
+    },
+  });
   await expect(page.locator(".bench-result-heading")).toContainText("Exit 0");
-  await page.screenshot({ path: testInfo.outputPath("test-bench-desktop.png") });
+  await page.screenshot({
+    path: testInfo.outputPath("test-bench-desktop.png"),
+  });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByLabel("Shell command", { exact: true })).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("test-bench-mobile.png") });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByLabel("Shell command", { exact: true }).fill("big-output");
   await page.getByRole("button", { name: "Run command", exact: true }).click();
-  await expect(page.getByText("Output limit reached", { exact: true })).toBeVisible();
-  await expect(page.getByText("Command completed", { exact: true })).toHaveCount(0);
-  expect((await page.getByLabel("Standard output", { exact: true }).textContent())?.length).toBe(32_000);
-  await expect(page.getByText("Output was shortened to keep this result manageable.")).toBeVisible();
+  await expect(
+    page.getByText("Output limit reached", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Command completed", { exact: true }),
+  ).toHaveCount(0);
+  expect(
+    (await page.getByLabel("Standard output", { exact: true }).textContent())
+      ?.length,
+  ).toBe(32_000);
+  await expect(
+    page.getByText("Output was shortened to keep this result manageable."),
+  ).toBeVisible();
   await page.reload();
   await page.getByRole("button", { name: /^Test benches/ }).click();
-  await expect(page.getByRole("heading", { name: "Motor bench", exact: true })).toBeVisible();
-  await expect(page.getByText("Available to your agent", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Motor bench", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Available to your agent", { exact: true }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Edit bench", exact: true }).click();
   await expect(page.getByLabel("Port", { exact: true })).toHaveValue("2222");
   await enable.uncheck();
   await page.getByRole("button", { name: "Save bench", exact: true }).click();
-  await expect(page.getByLabel("Shell command", { exact: true })).toBeDisabled();
+  await expect(
+    page.getByLabel("Shell command", { exact: true }),
+  ).toBeDisabled();
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Remove", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Bring your test bench into the workspace" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "Bring your test bench into the workspace",
+    }),
+  ).toBeVisible();
   expect(await workspace.call("benches.list", { projectId })).toEqual([]);
 });
 
-test("a remote command result stays with its project when switching projects", async ({ page }) => {
+test("a remote command result stays with its project when switching projects", async ({
+  page,
+}) => {
   await createProject(page);
   const oldProjectId = projectId;
-  const bench = await workspace.call("benches.add", { projectId, name: "Old project bench", host: "lab-bench", enabled: true }) as TestBench;
+  const bench = (await workspace.call("benches.add", {
+    projectId,
+    name: "Old project bench",
+    host: "lab-bench",
+    enabled: true,
+  })) as TestBench;
   await workspace.call("projects.create", { name: "New hardware project" });
   await page.reload();
   await page.getByRole("button", { name: /^Test benches/ }).click();
-  await expect(page.getByRole("heading", { name: "Old project bench", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Old project bench", exact: true }),
+  ).toBeVisible();
   let release!: () => void;
   let notifyHeld!: () => void;
-  const held = new Promise<void>((resolve) => { notifyHeld = resolve; });
-  const released = new Promise<void>((resolve) => { release = resolve; });
+  const held = new Promise<void>((resolve) => {
+    notifyHeld = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   await page.route("**/api/call", async (route) => {
     const request = route.request().postDataJSON();
     if (request?.method !== "benches.execute") {
@@ -1520,28 +2065,76 @@ test("a remote command result stays with its project when switching projects", a
     expect(request.args.projectId).toBe(oldProjectId);
     notifyHeld();
     await released;
-    await route.fulfill({ json: { result: { benchId: bench.id, command: "uname -a", stdout: "Previous project output", stderr: "", exitCode: 0, signal: null, timedOut: false, truncated: false, durationMs: 100 } } });
+    await route.fulfill({
+      json: {
+        result: {
+          benchId: bench.id,
+          command: "uname -a",
+          stdout: "Previous project output",
+          stderr: "",
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          truncated: false,
+          durationMs: 100,
+        },
+      },
+    });
   });
   try {
     await page.getByLabel("Shell command", { exact: true }).fill("uname -a");
-    await page.getByRole("button", { name: "Run command", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Run command", exact: true })
+      .click();
     await held;
-    await expect(page.getByText("Waiting for the remote command…", { exact: false })).toBeVisible();
+    await expect(
+      page.getByText("Waiting for the remote command…", { exact: false }),
+    ).toBeVisible();
     await page.locator(".project-switcher").click();
-    await page.getByRole("dialog").getByRole("button", { name: /^N New hardware project/ }).click();
-    await expect(page.getByRole("heading", { name: "Bring your test bench into the workspace" })).toBeVisible();
-    const delivered = page.waitForResponse((response) => response.request().postDataJSON()?.method === "benches.execute");
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: /^N New hardware project/ })
+      .click();
+    await expect(
+      page.getByRole("heading", {
+        name: "Bring your test bench into the workspace",
+      }),
+    ).toBeVisible();
+    const delivered = page.waitForResponse(
+      (response) =>
+        response.request().postDataJSON()?.method === "benches.execute",
+    );
     release();
     await delivered;
-    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-    await expect(page.getByText("Previous project output", { exact: true })).toHaveCount(0);
-    await expect(page.getByText("Command completed", { exact: true })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /^Test benches/ })).toContainText("—");
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    await expect(
+      page.getByText("Previous project output", { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByText("Command completed", { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: /^Test benches/ }),
+    ).toContainText("—");
     await page.locator(".project-switcher").click();
-    await page.getByRole("dialog").getByRole("button", { name: /^F Flight controller/ }).click();
-    await expect(page.getByRole("heading", { name: "Old project bench", exact: true })).toBeVisible();
-    await expect(page.getByLabel("Shell command", { exact: true })).toHaveValue("");
-    await expect(page.getByText("Previous project output", { exact: true })).toHaveCount(0);
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: /^F Flight controller/ })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Old project bench", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Shell command", { exact: true })).toHaveValue(
+      "",
+    );
+    await expect(
+      page.getByText("Previous project output", { exact: true }),
+    ).toHaveCount(0);
   } finally {
     release();
   }

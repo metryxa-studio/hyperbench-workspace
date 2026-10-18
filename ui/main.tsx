@@ -40,6 +40,7 @@ function App() {
   const [system, setSystem] = useState<SystemModel | null>(null);
   const [drafts, setDrafts] = useState<SystemDraft[]>([]);
   const [view, setView] = useState<View>("system");
+  const [initialized, setInitialized] = useState(false);
   const [busy, setBusy] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -48,6 +49,8 @@ function App() {
   const [creating, setCreating] = useState(false);
   const [modalError, setModalError] = useState("");
   const [toast, setToast] = useState("");
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
   const projectRef = useRef<string | null>(null);
   const loadGeneration = useRef(0);
   const systemRef = useRef(system);
@@ -62,6 +65,10 @@ function App() {
     JSON.stringify(system) !== JSON.stringify(savedSystem);
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
+  function updateProjects(next: Project[]) {
+    projectsRef.current = next;
+    setProjects(next);
+  }
   function updateSystem(next: SystemModel | null) {
     systemRef.current = next;
     dirtyRef.current =
@@ -86,7 +93,7 @@ function App() {
   async function chooseProject(next: Project, force = false) {
     if (
       !force &&
-      dirty &&
+      dirtyRef.current &&
       !window.confirm(
         "Discard your unsaved system changes and switch projects?",
       )
@@ -138,24 +145,28 @@ function App() {
         setBusy(false);
     }
   }
+  async function initialize() {
+    setBusy(true);
+    setError("");
+    try {
+      const [configuration, items] = await Promise.all([
+        getConfig(),
+        call<Project[]>("projects.list"),
+      ]);
+      setConfig(configuration);
+      updateProjects(items);
+      setInitialized(true);
+      const last = sessionStorage.getItem("hyperbench.project");
+      const initial = items.find((item) => item.id === last) || items[0];
+      if (initial) await chooseProject(initial, true);
+      else setBusy(false);
+    } catch (e) {
+      setError(message(e));
+      setBusy(false);
+    }
+  }
   useEffect(() => {
-    void (async () => {
-      try {
-        const [configuration, items] = await Promise.all([
-          getConfig(),
-          call<Project[]>("projects.list"),
-        ]);
-        setConfig(configuration);
-        setProjects(items);
-        const last = sessionStorage.getItem("hyperbench.project");
-        const initial = items.find((item) => item.id === last) || items[0];
-        if (initial) await chooseProject(initial, true);
-        else setBusy(false);
-      } catch (e) {
-        setError(message(e));
-        setBusy(false);
-      }
-    })();
+    void initialize();
   }, []);
   useEffect(() => {
     if (!project) return;
@@ -204,7 +215,6 @@ function App() {
           updateSavedSystem(fresh);
         }
       } catch {
-        /* Manual actions surface API failures. */
       } finally {
         pending = false;
       }
@@ -250,7 +260,6 @@ function App() {
     const ports = new Map(
       snapshot.components.map((item) => [item.id, item.ports]),
     );
-    // Reconcile endpoints after editing, so partial typing cannot drop a valid link.
     const payload = {
       ...snapshot,
       connections: snapshot.connections.map((item) => {
@@ -372,7 +381,7 @@ function App() {
       const next = await call<Project>("projects.create", {
         name: projectName.trim(),
       });
-      setProjects((items) => [...items, next]);
+      updateProjects([...projectsRef.current, next]);
       setProjectName("");
       await chooseProject(next);
     } catch (e) {
@@ -391,15 +400,20 @@ function App() {
     setModalError("");
     try {
       await call("projects.delete", { projectId: item.id });
-      const remaining = projects.filter((p) => p.id !== item.id);
-      setProjects(remaining);
-      if (project?.id === item.id) {
+      const remaining = projectsRef.current.filter((p) => p.id !== item.id);
+      updateProjects(remaining);
+      if (projectRef.current === item.id) {
+        ++loadGeneration.current;
         projectRef.current = null;
         setProject(null);
+        setRepositories([]);
+        setDocuments([]);
+        setDrafts([]);
         setBenches([]);
         updateSystem(null);
         updateSavedSystem(null);
         if (remaining[0]) await chooseProject(remaining[0], true);
+        else setBusy(false);
       }
     } catch (e) {
       setModalError(message(e));
@@ -421,6 +435,7 @@ function App() {
         </a>
         <button
           className="project-switcher"
+          disabled={!initialized}
           onClick={() => {
             setModal("projects");
             setModalError("");
@@ -507,7 +522,14 @@ function App() {
           </div>
         </header>
         {error && (
-          <ErrorBanner onClose={() => setError("")}>{error}</ErrorBanner>
+          <ErrorBanner onClose={initialized ? () => setError("") : undefined}>
+            {error}
+            {!initialized && (
+              <Button onClick={() => void initialize()} disabled={busy}>
+                Retry
+              </Button>
+            )}
+          </ErrorBanner>
         )}
         {busy ? (
           <Loading>Opening your workspace…</Loading>
@@ -517,6 +539,7 @@ function App() {
             <Button
               variant="primary"
               icon="plus"
+              disabled={!initialized}
               onClick={() => setModal("projects")}
             >
               Create project

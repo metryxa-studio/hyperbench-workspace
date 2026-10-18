@@ -1,12 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import {
+  mkdtemp,
+  writeFile,
+  rm,
+  realpath,
+  unlink,
+  symlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import http from "node:http";
 import { startBrowserServer } from "../src/server.js";
 async function fixture() {
-  const dir = await mkdtemp(path.join(tmpdir(), "hb-http-"));
+  const dir = await realpath(await mkdtemp(path.join(tmpdir(), "hb-http-")));
   await writeFile(path.join(dir, "index.html"), "<h1>Hyperbench</h1>");
   const calls: any[] = [];
   const server = await startBrowserServer(
@@ -172,6 +179,19 @@ test("original documents download as attachments and cannot execute HTML", async
       "application/octet-stream",
     );
     assert.match(response.headers.get("content-disposition")!, /^attachment/);
+    await response.arrayBuffer();
+    if (process.platform !== "win32") {
+      const secret = path.join(s.dir, "private.txt");
+      await writeFile(secret, "PRIVATE_DOWNLOAD_CANARY");
+      await unlink(path.join(s.dir, "index.html"));
+      await symlink(secret, path.join(s.dir, "index.html"));
+      const replaced = await fetch(
+        s.origin + "/api/file?projectId=p&documentId=d",
+        { headers: s.headers },
+      );
+      assert.equal(replaced.status, 400);
+      assert.doesNotMatch(await replaced.text(), /PRIVATE_DOWNLOAD_CANARY/);
+    }
   } finally {
     await s.cleanup();
   }
