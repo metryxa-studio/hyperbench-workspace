@@ -662,10 +662,12 @@ test("clone uses a new destination and removal leaves the clone on disk", async 
     }),
     /credentials/u,
   );
+  const clonedContents = await readFile(join(destination, "flight.c"), "utf8");
+  assert.match(clonedContents, /^controller\r?\n$/u);
   await f.call("repositories.remove", { repositoryId: clone.id });
   assert.equal(
     await readFile(join(destination, "flight.c"), "utf8"),
-    "controller\n",
+    clonedContents,
   );
 });
 
