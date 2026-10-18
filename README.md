@@ -11,7 +11,7 @@ Connect repositories, PDFs, and a system diagram. Your agent can follow source a
 Requires **Node.js 22.13+** (a current LTS release is recommended). Git is needed to clone repositories; existing folders and documents can be used without it.
 
 ```sh
-npm install -g https://github.com/metryxa-studio/hyperbench-workspace/releases/download/v0.1.0/hyperbench-workspace-0.1.0.tgz
+npm install -g hyperbench-workspace
 hyperbench start
 ```
 
@@ -20,10 +20,23 @@ This opens the local browser workspace. Keep the terminal process running; `Ctrl
 To try it without a global install:
 
 ```sh
-npx --yes --package=https://github.com/metryxa-studio/hyperbench-workspace/releases/download/v0.1.0/hyperbench-workspace-0.1.0.tgz hyperbench start
+npx --yes --package=hyperbench-workspace hyperbench start
 ```
 
 Agent configurations refer to the installed package path. Prefer the global install for a durable connection; regenerate your connection if you move or remove the package.
+
+The npm package is built from this public repository. It contains the compiled app and skills; the code indexer is excluded. Versioned `.tgz` downloads are also available on [GitHub Releases](https://github.com/metryxa-studio/hyperbench-workspace/releases).
+
+### Update
+
+Stop the workspace, then install the latest release:
+
+```sh
+npm install -g hyperbench-workspace@latest
+hyperbench start
+```
+
+Reconnect your agent to restart its MCP process with the updated package. Your local projects and documents stay in the data directory. Updates are published as new versions; existing installations do not update automatically. To install a specific version, use `hyperbench-workspace@0.1.0` instead.
 
 ## First project
 

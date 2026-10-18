@@ -6,9 +6,10 @@ import { spawn, execFileSync } from "node:child_process";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-const archive = path.resolve(
-  process.argv[2] || "hyperbench-workspace-0.1.0.tgz",
-);
+const fromRegistry = process.argv[2] === "--registry";
+const packageSpec = fromRegistry
+  ? process.argv[3] || "hyperbench-workspace"
+  : path.resolve(process.argv[2] || "hyperbench-workspace-0.1.0.tgz");
 const root = await mkdtemp(path.join(tmpdir(), "hyperbench package check "));
 const cli = path.join(
   root,
@@ -19,7 +20,13 @@ let server, client, transport;
 try {
   execFileSync(
     process.platform === "win32" ? "npm.cmd" : "npm",
-    ["install", "--prefix", root, archive],
+    [
+      "install",
+      "--prefix",
+      root,
+      packageSpec,
+      "--registry=https://registry.npmjs.org",
+    ],
     { stdio: "pipe", shell: process.platform === "win32" },
   );
   const doctor = JSON.parse(
