@@ -7,8 +7,10 @@ import type {
   Project,
   Repository,
   SystemDraft,
+  SystemLayout,
   SystemModel,
 } from "../src/types";
+import { SYSTEM_LAYOUTS } from "../src/types";
 import { message, newId } from "./api";
 import {
   Badge,
@@ -21,6 +23,17 @@ import {
   Modal,
 } from "./common";
 import { EvidenceEditor, EvidencePreview, evidenceLabel } from "./Evidence";
+import { DeviceOutline, OUTLINE_BOUNDS } from "./DeviceOutline";
+
+const outlineLabels: Record<SystemLayout, string> = {
+  blank: "Blank canvas",
+  quadrotor: "Quadrotor",
+  hexarotor: "Hexarotor",
+  octorotor: "Octorotor",
+  "fixed-wing": "Fixed-wing aircraft",
+  "robot-arm": "Robot arm",
+  truck: "Truck",
+};
 
 interface Props {
   project: Project;
@@ -83,6 +96,7 @@ export function SystemView(props: Props) {
     scale: number;
   } | null>(null);
   const displayed = draft?.system || system;
+  const hasOutline = displayed.layout !== "blank";
   const component =
     selection?.type === "component"
       ? displayed.components.find((item) => item.id === selection.id)
@@ -133,17 +147,21 @@ export function SystemView(props: Props) {
       kind,
       description: "",
       x: first
-        ? 0
+        ? hasOutline
+          ? (OUTLINE_BOUNDS.width - 224) / 2
+          : 0
         : Math.max(20, (120 - viewport.x) / viewport.scale) +
           (system.components.length % 3) * 50,
       y: first
-        ? 0
+        ? hasOutline
+          ? (OUTLINE_BOUNDS.height - 124) / 2
+          : 0
         : Math.max(20, (120 - viewport.y) / viewport.scale) +
           (system.components.length % 5) * 45,
       ports: [],
       evidence: [],
     };
-    if (first) {
+    if (first && !hasOutline) {
       const rect = canvasRef.current?.getBoundingClientRect();
       setViewport({
         x: Math.min(48, Math.max(16, ((rect?.width || 320) - 224) / 2)),
@@ -179,14 +197,26 @@ export function SystemView(props: Props) {
     setSelection(null);
   }
   function fit() {
-    if (!displayed.components.length || !canvasRef.current) {
+    if ((!displayed.components.length && !hasOutline) || !canvasRef.current) {
       setViewport({ x: 80, y: 90, scale: 1 });
       return;
     }
-    const minX = Math.min(...displayed.components.map((c) => c.x)),
-      minY = Math.min(...displayed.components.map((c) => c.y));
-    const maxX = Math.max(...displayed.components.map((c) => c.x + 224)),
-      maxY = Math.max(...displayed.components.map((c) => c.y + 124));
+    const minX = Math.min(
+        ...displayed.components.map((c) => c.x),
+        ...(hasOutline ? [OUTLINE_BOUNDS.x] : []),
+      ),
+      minY = Math.min(
+        ...displayed.components.map((c) => c.y),
+        ...(hasOutline ? [OUTLINE_BOUNDS.y] : []),
+      );
+    const maxX = Math.max(
+        ...displayed.components.map((c) => c.x + 224),
+        ...(hasOutline ? [OUTLINE_BOUNDS.width] : []),
+      ),
+      maxY = Math.max(
+        ...displayed.components.map((c) => c.y + 124),
+        ...(hasOutline ? [OUTLINE_BOUNDS.height] : []),
+      );
     const rect = canvasRef.current.getBoundingClientRect();
     const paddingX = rect.width < 600 ? 32 : 80;
     const scale = Math.min(
@@ -206,8 +236,8 @@ export function SystemView(props: Props) {
     });
   }
   useLayoutEffect(() => {
-    if (system.components.length) fit();
-  }, [project.id]);
+    fit();
+  }, [project.id, displayed.layout, draft?.id]);
   function zoom(factor: number) {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -342,22 +372,42 @@ export function SystemView(props: Props) {
         </div>
       </div>
       <div className="canvas-toolbar">
-        <div className="filter-tabs" aria-label="Component filter">
-          {[
-            ["all", "All components", displayed.components.length],
-            ["hardware", "Hardware", counts("hardware")],
-            ["software", "Software", counts("software")],
-            ["external", "External", counts("external")],
-          ].map(([value, name, count]) => (
-            <button
-              key={value}
-              className={filter === value ? "active" : ""}
-              onClick={() => setFilter(String(value))}
-            >
-              {name}
-              <span>{count}</span>
-            </button>
-          ))}
+        <div className="canvas-view-controls">
+          <select
+            className="outline-select"
+            aria-label="Device outline"
+            value={displayed.layout}
+            disabled={readOnly || saving}
+            onChange={(event) =>
+              onChange({
+                ...system,
+                layout: event.target.value as SystemLayout,
+              })
+            }
+          >
+            {SYSTEM_LAYOUTS.map((layout) => (
+              <option key={layout} value={layout}>
+                {outlineLabels[layout]}
+              </option>
+            ))}
+          </select>
+          <div className="filter-tabs" aria-label="Component filter">
+            {[
+              ["all", "All components", displayed.components.length],
+              ["hardware", "Hardware", counts("hardware")],
+              ["software", "Software", counts("software")],
+              ["external", "External", counts("external")],
+            ].map(([value, name, count]) => (
+              <button
+                key={value}
+                className={filter === value ? "active" : ""}
+                onClick={() => setFilter(String(value))}
+              >
+                {name}
+                <span>{count}</span>
+              </button>
+            ))}
+          </div>
         </div>
         <div className="toolbar-right">
           <Button
@@ -460,6 +510,7 @@ export function SystemView(props: Props) {
               transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
             }}
           >
+            <DeviceOutline layout={displayed.layout} />
             <svg
               className="connection-layer"
               width="1"
@@ -624,7 +675,7 @@ export function SystemView(props: Props) {
               </div>
             ))}
           </div>
-          {!displayed.components.length && (
+          {!displayed.components.length && !hasOutline && (
             <div className="canvas-empty">
               <h2>No components</h2>
               <Button

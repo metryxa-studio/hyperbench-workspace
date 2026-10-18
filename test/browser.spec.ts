@@ -5,6 +5,7 @@ import path from "node:path";
 import { Workspace } from "../src/core/workspace";
 import { startBrowserServer } from "../src/server";
 import { pdfFixture } from "./pdf-fixture";
+import type { SystemModel } from "../src/types";
 let directory: string,
   workspace: Workspace,
   local: Awaited<ReturnType<typeof startBrowserServer>>;
@@ -55,6 +56,97 @@ async function save(page: any) {
   await expect(
     page.getByRole("banner").getByText("Saved", { exact: true }),
   ).toHaveText("Saved");
+}
+
+async function seedConnectedSystem(page: any) {
+  await createProject(page);
+  const repoPath = path.join(directory, "controller");
+  await mkdir(repoPath);
+  await writeFile(
+    path.join(repoPath, "serial.c"),
+    "void send_temperature(void);\n",
+  );
+  const repository: any = await workspace.call("repositories.add", {
+    projectId,
+    path: repoPath,
+  });
+  const document: any = await workspace.call("documents.upload", {
+    projectId,
+    name: "connector.txt",
+    base64: Buffer.from(
+      "TX connects to RX on the temperature sensor.",
+    ).toString("base64"),
+  });
+  const system: SystemModel = {
+    revision: 0,
+    title: "Flight controller",
+    layout: "blank",
+    components: [
+      {
+        id: "controller",
+        label: "Controller",
+        kind: "hardware",
+        description: "Controller serial output",
+        x: 100,
+        y: 110,
+        ports: ["TX"],
+        evidence: [
+          {
+            type: "source",
+            repositoryId: repository.id,
+            path: "serial.c",
+            line: 1,
+          },
+        ],
+      },
+      {
+        id: "sensor",
+        label: "Temperature sensor",
+        kind: "hardware",
+        description: "Sensor serial input",
+        x: 470,
+        y: 250,
+        ports: ["RX"],
+        evidence: [{ type: "document", documentId: document.id, page: 1 }],
+      },
+    ],
+    connections: [
+      {
+        id: "serial",
+        from: "controller",
+        to: "sensor",
+        label: "Serial",
+        fromPort: "TX",
+        toPort: "RX",
+        evidence: [{ type: "document", documentId: document.id, page: 1 }],
+      },
+    ],
+    links: [
+      {
+        id: "connector",
+        documentId: document.id,
+        page: 1,
+        componentId: "controller",
+        repositoryId: repository.id,
+        path: "serial.c",
+        line: 1,
+        note: "Controller connector wiring",
+      },
+    ],
+  };
+  const saved = (await workspace.call("system.save", {
+    projectId,
+    expectedRevision: 0,
+    system,
+  })) as SystemModel;
+  await page.reload();
+  await expect(
+    page.getByRole("button", {
+      name: "Controller, hardware component",
+      exact: true,
+    }),
+  ).toBeVisible();
+  return saved;
 }
 
 test("onboarding, component editing and save survive browser reload", async ({
@@ -123,13 +215,11 @@ test("document upload, component link, save and link removal are coherent", asyn
     .getByRole("navigation")
     .getByRole("button", { name: /Documents/ })
     .click();
-  await page
-    .getByLabel("Upload documents")
-    .setInputFiles({
-      name: "board.txt",
-      mimeType: "text/plain",
-      buffer: Buffer.from("Controller pin 3 carries temperature data."),
-    });
+  await page.getByLabel("Upload documents").setInputFiles({
+    name: "board.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("Controller pin 3 carries temperature data."),
+  });
   await expect(page.locator(".document-text")).toContainText(
     "Controller pin 3",
   );
@@ -167,6 +257,7 @@ test("an external agent draft is visible for review and only explicit acceptance
 }) => {
   await createProject(page);
   const model: any = await workspace.call("system.get", { projectId });
+  model.layout = "truck";
   model.components = [
     {
       id: "temperature",
@@ -197,6 +288,16 @@ test("an external agent draft is visible for review and only explicit acceptance
   await expect(
     page.getByText("Temperature sensor", { exact: true }).first(),
   ).toBeVisible();
+  await expect(
+    page.getByLabel("Device outline", { exact: true }),
+  ).toBeDisabled();
+  await expect(page.locator(".device-outline")).toHaveAttribute(
+    "data-layout",
+    "truck",
+  );
+  expect(
+    ((await workspace.call("system.get", { projectId })) as SystemModel).layout,
+  ).toBe("blank");
   await page
     .getByRole("button", { name: "Accept & save", exact: true })
     .click();
@@ -210,6 +311,12 @@ test("an external agent draft is visible for review and only explicit acceptance
           .length,
     )
     .toBe(1);
+  await expect(
+    page.getByLabel("Device outline", { exact: true }),
+  ).toBeEnabled();
+  expect(
+    ((await workspace.call("system.get", { projectId })) as SystemModel).layout,
+  ).toBe("truck");
 });
 
 test("stale external edits cannot overwrite a browser draft", async ({
@@ -242,13 +349,11 @@ test("PDF pages render, extracted text is readable and original download preserv
     .getByRole("button", { name: /Documents/ })
     .click();
   const pdf = pdfFixture(2);
-  await page
-    .getByLabel("Upload documents")
-    .setInputFiles({
-      name: "connector.pdf",
-      mimeType: "application/pdf",
-      buffer: pdf,
-    });
+  await page.getByLabel("Upload documents").setInputFiles({
+    name: "connector.pdf",
+    mimeType: "application/pdf",
+    buffer: pdf,
+  });
   await expect(
     page.getByRole("img", { name: "Page 1 of connector.pdf" }),
   ).toBeVisible();
@@ -358,4 +463,186 @@ test("narrow layout keeps navigation, editing and save reachable", async ({
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true);
+});
+
+test("device outlines preserve the complete system through switching, saving, reload and discard", async ({
+  page,
+}) => {
+  const original = await seedConnectedSystem(page);
+  const layouts = [
+    "quadrotor",
+    "hexarotor",
+    "octorotor",
+    "fixed-wing",
+    "robot-arm",
+    "truck",
+    "blank",
+  ];
+  const selector = page.getByLabel("Device outline", { exact: true });
+  for (const layout of layouts) {
+    await selector.selectOption(layout);
+    await save(page);
+    const saved = (await workspace.call("system.get", {
+      projectId,
+    })) as SystemModel;
+    expect(saved.layout).toBe(layout);
+    expect(saved.components).toEqual(original.components);
+    expect(saved.connections).toEqual(original.connections);
+    expect(saved.links).toEqual(original.links);
+    await page.reload();
+    await expect(selector).toHaveValue(layout);
+    if (layout === "blank") {
+      await expect(page.locator(".device-outline")).toHaveCount(0);
+    } else {
+      await expect(page.locator(".device-outline")).toHaveAttribute(
+        "data-layout",
+        layout,
+      );
+      await expect(page.locator(".device-outline")).toBeVisible();
+    }
+    await expect(page.locator(".canvas-node")).toHaveCount(2);
+    await expect(
+      page.getByRole("button", {
+        name: "Connection from Controller to Temperature sensor: Serial",
+        exact: true,
+      }),
+    ).toBeVisible();
+  }
+  await selector.selectOption("robot-arm");
+  await expect(page.locator(".device-outline")).toHaveAttribute(
+    "data-layout",
+    "robot-arm",
+  );
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Discard", exact: true }).click();
+  await expect(selector).toHaveValue("blank");
+  await expect(page.locator(".device-outline")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Save", exact: true }),
+  ).toBeDisabled();
+  const saved = (await workspace.call("system.get", {
+    projectId,
+  })) as SystemModel;
+  expect(saved.components).toEqual(original.components);
+  expect(saved.connections).toEqual(original.connections);
+  expect(saved.links).toEqual(original.links);
+});
+
+test("every device outline fits a narrow canvas without hiding the selector or save action", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await createProject(page);
+  const selector = page.getByLabel("Device outline", { exact: true });
+  for (const layout of [
+    "quadrotor",
+    "hexarotor",
+    "octorotor",
+    "fixed-wing",
+    "robot-arm",
+    "truck",
+  ]) {
+    await selector.selectOption(layout);
+    const outline = page.locator(".device-outline");
+    await expect(outline).toHaveAttribute("data-layout", layout);
+    await expect
+      .poll(async () => {
+        const image = await outline.boundingBox(),
+          canvas = await page.locator(".canvas").boundingBox();
+        return (
+          !!image &&
+          !!canvas &&
+          image.width > 0 &&
+          image.height > 0 &&
+          image.x >= canvas.x - 1 &&
+          image.y >= canvas.y - 1 &&
+          image.x + image.width <= canvas.x + canvas.width + 1 &&
+          image.y + image.height <= canvas.y + canvas.height + 1
+        );
+      })
+      .toBe(true);
+    await expect(selector).toBeInViewport();
+    await expect(
+      page.getByRole("button", { name: "Save", exact: true }),
+    ).toBeInViewport();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+  }
+  await save(page);
+  await page.reload();
+  await expect(selector).toHaveValue("truck");
+  await expect(page.locator(".device-outline")).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("workspace-truck-narrow.png"),
+  });
+});
+
+test("outline artwork does not block panning or dragging connected components", async ({
+  page,
+}) => {
+  const original = await seedConnectedSystem(page);
+  await page
+    .getByLabel("Device outline", { exact: true })
+    .selectOption("quadrotor");
+  await save(page);
+  const outline = page.locator(".device-outline");
+  const beforePan = (await outline.boundingBox())!;
+  const panStart = {
+    x: beforePan.x + beforePan.width / 2,
+    y: beforePan.y + beforePan.height / 10,
+  };
+  await page.mouse.move(panStart.x, panStart.y);
+  await page.mouse.down();
+  await page.mouse.move(panStart.x + 32, panStart.y + 18, { steps: 5 });
+  await page.mouse.up();
+  await expect
+    .poll(async () =>
+      Math.round((await outline.boundingBox())!.x - beforePan.x),
+    )
+    .toBe(32);
+  await expect
+    .poll(async () =>
+      Math.round((await outline.boundingBox())!.y - beforePan.y),
+    )
+    .toBe(18);
+  await expect(
+    page.getByRole("button", { name: "Save", exact: true }),
+  ).toBeDisabled();
+
+  const node = page.getByRole("button", {
+    name: "Controller, hardware component",
+    exact: true,
+  });
+  const beforeDrag = (await node.boundingBox())!;
+  const dragStart = {
+    x: beforeDrag.x + beforeDrag.width / 2,
+    y: beforeDrag.y + beforeDrag.height / 2,
+  };
+  await page.mouse.move(dragStart.x, dragStart.y);
+  await page.mouse.down();
+  await page.mouse.move(dragStart.x + 45, dragStart.y + 30, { steps: 5 });
+  await page.mouse.up();
+  await expect
+    .poll(async () =>
+      Math.abs((await node.boundingBox())!.x - beforeDrag.x - 45),
+    )
+    .toBeLessThan(1);
+  await expect
+    .poll(async () =>
+      Math.abs((await node.boundingBox())!.y - beforeDrag.y - 30),
+    )
+    .toBeLessThan(1);
+  await save(page);
+  const saved = (await workspace.call("system.get", {
+    projectId,
+  })) as SystemModel;
+  expect(saved.components[0].x).toBeGreaterThan(original.components[0].x);
+  expect(saved.components[0].y).toBeGreaterThan(original.components[0].y);
+  expect(saved.components[0].evidence).toEqual(original.components[0].evidence);
+  expect(saved.components[1]).toEqual(original.components[1]);
+  expect(saved.connections).toEqual(original.connections);
+  expect(saved.links).toEqual(original.links);
 });

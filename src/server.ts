@@ -112,7 +112,7 @@ export async function startBrowserServer(
       }
       const url = new URL(request.url ?? "/", `http://${authority}`);
       if (url.pathname === "/health" && request.method === "GET") {
-        json(response, 200, { ok: true, version: "0.1.0" });
+        json(response, 200, { ok: true, version: "0.1.1" });
         return;
       }
       if (url.pathname.startsWith("/api/")) {
@@ -132,7 +132,7 @@ export async function startBrowserServer(
             dataDir: options.dataDir,
             cliPath: options.cliPath,
             nodePath: options.nodePath,
-            version: "0.1.0",
+            version: "0.1.1",
           });
           return;
         }

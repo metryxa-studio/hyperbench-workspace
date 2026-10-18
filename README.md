@@ -36,15 +36,17 @@ npm install -g hyperbench-workspace@latest
 hyperbench start
 ```
 
-Reconnect your agent to restart its MCP process with the updated package. Your local projects and documents stay in the data directory. Updates are published as new versions; existing installations do not update automatically. To install a specific version, use `hyperbench-workspace@0.1.0` instead.
+Reconnect your agent to restart its MCP process with the updated package. Your local projects and documents stay in the data directory. Updates are published as new versions; existing installations do not update automatically. To install a specific version, use `hyperbench-workspace@0.1.1` instead.
 
 ## First project
 
 1. Create a project.
 2. In **Repositories**, register a local folder or clone a Git URL to a new local destination. Git uses your existing SSH/credential setup.
 3. In **Documents**, drop PDFs or text files into the workspace, or import by local path.
-4. In **System**, add components, ports, and connections. Link them to source paths or document pages. Click **Save** to keep edits.
+4. In **System**, choose a blank canvas or a drone, fixed-wing aircraft, robot arm, or truck outline. Add components, ports, and connections, then link them to source paths or document pages. Click **Save** to keep edits.
 5. Open **Connect agent** and copy the configuration for your client. Reconnect the client, then ask it to list Hyperbench projects.
+
+Changing the outline keeps your components, positions, connections, and evidence links. The drawings provide a backdrop; they do not add inferred hardware connections.
 
 The same project can have multiple repositories and documents. An agent can submit a system draft; it appears in the UI for review. Acceptance checks its original revision so a stale draft cannot silently replace newer work.
 

@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { Workspace } from "../src/core/workspace.ts";
+import { SYSTEM_LAYOUTS } from "../src/types.ts";
 import type {
   DocumentSummary,
   Project,
@@ -393,6 +394,70 @@ test("system compare-and-swap survives two connections; drafts do not alter save
     f.call("system.save", { system: model() }),
     /Expected revision/u,
   );
+});
+
+test("all device outlines persist without changing graph, evidence, or revision protection", async (t) => {
+  const f = await fixture(t);
+  await writeFile(join(f.source, "flight.c"), "controller\n");
+  const document = await f.call<DocumentSummary>("documents.upload", {
+    name: "manual.txt",
+    base64: Buffer.from("Pin mapping").toString("base64"),
+  });
+  const graph = model();
+  graph.components[0]!.evidence.push({
+    type: "source",
+    repositoryId: f.repository.id,
+    path: "flight.c",
+    line: 1,
+  });
+  graph.connections[0]!.evidence.push({
+    type: "document",
+    documentId: document.id,
+    page: 1,
+  });
+  graph.links.push({
+    id: "manual",
+    documentId: document.id,
+    page: 1,
+    componentId: "fc",
+    note: "Pin mapping",
+  });
+  let revision = 0;
+  for (const layout of SYSTEM_LAYOUTS) {
+    const saved = await f.call<SystemModel>("system.save", {
+      system: { ...graph, layout },
+      expectedRevision: revision,
+    });
+    assert.deepEqual(saved, { ...graph, layout, revision: ++revision });
+    const reopened = f.connect();
+    try {
+      assert.deepEqual(
+        await reopened.call("system.get", { projectId: f.project.id }),
+        saved,
+      );
+      await assert.rejects(
+        reopened.call("system.save", {
+          projectId: f.project.id,
+          system: { ...graph, layout: "blank" },
+          expectedRevision: revision - 1,
+        }),
+        /Revision conflict/u,
+      );
+    } finally {
+      reopened.close();
+    }
+  }
+  const before = await f.call<SystemModel>("system.get");
+  for (const layout of ["unknown-device", "drone", null, ["truck"]]) {
+    await assert.rejects(
+      f.call("system.save", {
+        system: { ...before, layout },
+        expectedRevision: before.revision,
+      }),
+      /System layout/u,
+    );
+  }
+  assert.deepEqual(await f.call("system.get"), before);
 });
 
 test("graph validation rejects dangling, duplicate, cross-project and malformed references", async (t) => {

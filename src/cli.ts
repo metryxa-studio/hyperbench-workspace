@@ -66,7 +66,7 @@ async function main() {
     },
   });
   if (values.version) {
-    console.log("0.1.0");
+    console.log("0.1.1");
     return;
   }
   if (values.help || !positionals.length) {

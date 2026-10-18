@@ -1,5 +1,13 @@
 # Validation
 
+## 0.1.1 — diagram outlines
+
+The outline update passes TypeScript, 46 backend tests on Node 22 and 26, and 11 Chromium workflows. The added checks cover all seven layout choices, save/reload/discard, unchanged graph and evidence links, read-only draft previews, panning and node dragging, and fitting every outline in a 390 px viewport. Drone, robot-arm, and truck artwork was also inspected in the browser. An independent code review found no introduced issues.
+
+The new choices require no database migration. Existing blank, quadrotor, and hexarotor values retain their meaning. Outlines are decorative and do not create inferred connections.
+
+## 0.1.0 — initial release
+
 Release checks for 0.1.0, run on 17 October 2026. These results describe the checks performed, not a guarantee that every agent client or hardware design is supported.
 
 | Check | Result |
@@ -46,8 +54,8 @@ npm run build
 npx playwright install chromium
 npm run test:ui
 npm pack
-node scripts/verify-package.mjs hyperbench-workspace-0.1.0.tgz
-node scripts/verify-package.mjs --registry hyperbench-workspace@0.1.0
+node scripts/verify-package.mjs hyperbench-workspace-0.1.1.tgz
+node scripts/verify-package.mjs --registry hyperbench-workspace@0.1.1
 ```
 
 The package check installs into a temporary folder and removes it afterward. It requires package-registry access. The GitHub workflow also runs the backend matrix on Linux, macOS and Windows with Node 22/24, plus Chromium on Linux; consult that run for platform results.

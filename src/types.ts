@@ -71,10 +71,20 @@ export interface DocumentLink {
   line?: number;
   note: string;
 }
+export const SYSTEM_LAYOUTS = [
+  "blank",
+  "quadrotor",
+  "hexarotor",
+  "octorotor",
+  "fixed-wing",
+  "robot-arm",
+  "truck",
+] as const;
+export type SystemLayout = (typeof SYSTEM_LAYOUTS)[number];
 export interface SystemModel {
   revision: number;
   title: string;
-  layout: "blank" | "quadrotor" | "hexarotor";
+  layout: SystemLayout;
   components: Component[];
   connections: Connection[];
   links: DocumentLink[];

@@ -484,6 +484,7 @@ button svg {
 }
 .canvas-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
@@ -491,6 +492,17 @@ button svg {
   border-top: 1px solid var(--surface-raised);
   border-bottom: 1px solid var(--line);
   background: var(--surface);
+}
+.canvas-view-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.outline-select {
+  width: auto;
+  max-width: 100%;
+  padding: 7px 10px;
 }
 .filter-tabs {
   display: flex;
@@ -558,6 +570,37 @@ button svg {
   width: 1px;
   height: 1px;
   transform-origin: 0 0;
+}
+.device-outline {
+  position: absolute;
+  left: 0;
+  top: 0;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.7;
+  pointer-events: none;
+}
+.device-outline :is(path, circle, rect, ellipse) {
+  vector-effect: non-scaling-stroke;
+}
+.device-outline .device-solid {
+  fill: var(--bg);
+}
+.device-outline .device-window {
+  fill: var(--surface);
+}
+.device-outline .device-detail {
+  opacity: 0.5;
+}
+.device-outline .device-guide {
+  stroke-dasharray: 2 5;
+  opacity: 0.35;
+}
+.device-outline .device-tire {
+  stroke-width: 1.2;
 }
 .connection-layer {
   position: absolute;

@@ -9,7 +9,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 const fromRegistry = process.argv[2] === "--registry";
 const packageSpec = fromRegistry
   ? process.argv[3] || "hyperbench-workspace"
-  : path.resolve(process.argv[2] || "hyperbench-workspace-0.1.0.tgz");
+  : path.resolve(process.argv[2] || "hyperbench-workspace-0.1.1.tgz");
 const root = await mkdtemp(path.join(tmpdir(), "hyperbench package check "));
 const cli = path.join(
   root,
@@ -139,6 +139,7 @@ try {
     /Pin 3/,
   );
   const system = await tool("system_get", { projectId: project.id });
+  system.layout = "truck";
   system.components = [
     {
       id: "sensor",
@@ -169,6 +170,10 @@ try {
   assert.equal(
     (await tool("system_get", { projectId: project.id })).components[0].label,
     "Sensor",
+  );
+  assert.equal(
+    (await tool("system_get", { projectId: project.id })).layout,
+    "truck",
   );
   console.log(
     JSON.stringify({

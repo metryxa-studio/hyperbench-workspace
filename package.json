@@ -1,6 +1,6 @@
 {
   "name": "hyperbench-workspace",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local hardware context, diagrams and documents for your own AI agent. No indexer or cloud service.",
   "type": "module",
   "license": "MIT",

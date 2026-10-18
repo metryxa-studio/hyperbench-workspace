@@ -14,6 +14,7 @@ import {
 } from "node:fs";
 import { unlink, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join } from "node:path";
+import { SYSTEM_LAYOUTS } from "../types.ts";
 import type {
   Args,
   Component,
@@ -286,9 +287,11 @@ export class Workspace {
     const title = string(model.title, "System title", 500);
     if (
       typeof model.layout !== "string" ||
-      !["blank", "quadrotor", "hexarotor"].includes(model.layout)
+      !SYSTEM_LAYOUTS.some((layout) => layout === model.layout)
     )
-      throw new Error("System layout must be blank, quadrotor, or hexarotor.");
+      throw new Error(
+        `System layout must be one of: ${SYSTEM_LAYOUTS.join(", ")}.`,
+      );
     const components: Component[] = list(
       model.components,
       "Components",
