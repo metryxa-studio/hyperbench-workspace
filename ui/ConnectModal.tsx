@@ -24,7 +24,7 @@ export function ConnectModal({
   ];
   const snippet =
     format === "toml"
-      ? `[mcp_servers.hyperbench]\ncommand = ${JSON.stringify(config.nodePath)}\nargs = ${JSON.stringify(args)}\n`
+      ? `[mcp_servers.hyperbench]\ncommand = ${JSON.stringify(config.nodePath)}\nargs = ${JSON.stringify(args)}\nenv_vars = ["SSH_AUTH_SOCK"]\ntool_timeout_sec = 330\n`
       : JSON.stringify(
           { mcpServers: { hyperbench: { command: config.nodePath, args } } },
           null,
@@ -75,7 +75,7 @@ export function ConnectModal({
         <span>2</span> Reload your agent
       </div>
       <blockquote className="agent-prompt">
-        Read my Hyperbench project context. Inspect the repositories and
+        Read my Hyperbench project context and list my test benches. Inspect the repositories and
         documents, cite file lines or document pages, and propose system changes
         as a draft for my review.
       </blockquote>

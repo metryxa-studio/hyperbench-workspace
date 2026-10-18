@@ -6,6 +6,7 @@ import type {
   DocumentSummary,
   SystemModel,
   SystemDraft,
+  TestBench,
 } from "../src/types";
 import { call, getConfig, message, type Config } from "./api";
 import {
@@ -23,16 +24,18 @@ import { ConnectModal } from "./ConnectModal";
 import { SystemView } from "./SystemView";
 import { RepositoryView } from "./RepositoryView";
 import { DocumentView } from "./DocumentView";
+import { BenchView } from "./BenchView";
 import mark from "./assets/hyperbench-mark.svg";
 import "./styles.css";
 
-type View = "system" | "repositories" | "documents";
+type View = "system" | "repositories" | "documents" | "benches";
 function App() {
   const [config, setConfig] = useState<Config | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState<Project | null>(null);
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
+  const [benches, setBenches] = useState<TestBench[]>([]);
   const [savedSystem, setSavedSystem] = useState<SystemModel | null>(null);
   const [system, setSystem] = useState<SystemModel | null>(null);
   const [drafts, setDrafts] = useState<SystemDraft[]>([]);
@@ -100,13 +103,15 @@ function App() {
     setDrafts([]);
     setRepositories([]);
     setDocuments([]);
+    setBenches([]);
     sessionStorage.setItem("hyperbench.project", next.id);
     try {
-      const [repos, docs, model, nextDrafts] = await Promise.all([
+      const [repos, docs, model, nextDrafts, nextBenches] = await Promise.all([
         call<Repository[]>("repositories.list", { projectId: next.id }),
         call<DocumentSummary[]>("documents.list", { projectId: next.id }),
         call<SystemModel>("system.get", { projectId: next.id }),
         call<SystemDraft[]>("drafts.list", { projectId: next.id }),
+        call<TestBench[]>("benches.list", { projectId: next.id }),
       ]);
       if (
         projectRef.current !== next.id ||
@@ -118,6 +123,7 @@ function App() {
       updateSystem(model);
       updateSavedSystem(model);
       setDrafts(nextDrafts);
+      setBenches(nextBenches);
     } catch (e) {
       if (
         projectRef.current === next.id &&
@@ -222,13 +228,16 @@ function App() {
   async function refreshContext() {
     if (!project) return;
     const id = project.id;
-    const [repos, docs] = await Promise.all([
+    const generation = loadGeneration.current;
+    const [repos, docs, nextBenches] = await Promise.all([
       call<Repository[]>("repositories.list", { projectId: id }),
       call<DocumentSummary[]>("documents.list", { projectId: id }),
+      call<TestBench[]>("benches.list", { projectId: id }),
     ]);
-    if (projectRef.current === id) {
+    if (projectRef.current === id && generation === loadGeneration.current) {
       setRepositories(repos);
       setDocuments(docs);
+      setBenches(nextBenches);
     }
   }
   async function saveSystem() {
@@ -375,7 +384,7 @@ function App() {
   async function deleteProject(item: Project) {
     if (
       !window.confirm(
-        `Delete “${item.name}” and its stored documents, system, and drafts? Repository source folders will stay on disk.`,
+        `Delete “${item.name}” and its stored documents, system, drafts, and test bench connections? Repository source folders and remote benches will stay in place.`,
       )
     )
       return;
@@ -387,6 +396,7 @@ function App() {
       if (project?.id === item.id) {
         projectRef.current = null;
         setProject(null);
+        setBenches([]);
         updateSystem(null);
         updateSavedSystem(null);
         if (remaining[0]) await chooseProject(remaining[0], true);
@@ -452,6 +462,14 @@ function App() {
             Documents
             <span className="nav-count">{documents.length || "—"}</span>
           </button>
+          <button
+            className={`nav-item ${view === "benches" ? "active" : ""}`}
+            onClick={() => setView("benches")}
+          >
+            <Icon name="terminal" />
+            Test benches
+            <span className="nav-count">{benches.length || "—"}</span>
+          </button>
         </nav>
         <div className="nav-spacer" />
         <div className="agent-connect">
@@ -474,7 +492,9 @@ function App() {
                 ? "System"
                 : view === "repositories"
                   ? "Repositories"
-                  : "Documents"}
+                  : view === "documents"
+                    ? "Documents"
+                    : "Test benches"}
             </strong>
           </div>
           <div className="topbar-actions">
@@ -543,6 +563,15 @@ function App() {
                 onRefresh={refreshContext}
                 system={system}
                 onSystemChange={updateSystem}
+                notify={notify}
+              />
+            )}
+            {view === "benches" && (
+              <BenchView
+                key={project.id}
+                project={project}
+                benches={benches}
+                onRefresh={refreshContext}
                 notify={notify}
               />
             )}

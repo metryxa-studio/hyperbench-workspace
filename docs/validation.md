@@ -1,5 +1,19 @@
 # Validation
 
+## Unreleased — SSH test benches
+
+TypeScript and the production build pass. The full backend suite passes all 59 tests, including the opt-in real SSH integration. Protocol checks cover project isolation, disabled-bench errors, command and timeout bounds, remote tool annotations, inclusion in project context, and authentication/origin requirements for all six browser bench methods. MCP exposes listing, connection testing, and execution; it exposes no bench registration, settings, or enablement tool.
+
+The real SSH check used a disposable loopback SSH server with locally generated keys and host trust material kept outside the repository. It verified the fixed connection probe, command stdout/stderr and exit code 7 through a real stdio MCP client, a one-second timeout, the combined 256 KiB output cap, and rejection of an untrusted host key. These checks confirm SSH and protocol behavior, not attached hardware behavior. All 21 Chromium workflows also pass, including bench creation/edit/removal, disabled-by-default commands, connection probes, execution and output-limit status, narrow layouts, and an in-flight command during project switching. The running browser was also used to probe a real local SSH target and run the simulated diagnostic successfully.
+
+To reproduce the optional SSH integration, prepare a disposable local SSH target and a JSON connection file outside the repository with `host`, `port`, `username`, `identityFile`, and `knownHostsFile`. Use absolute paths to the identity and prepared host trust file, and keep keys and user-specific connection settings outside the repository. The target needs a POSIX shell with `printf`, `uname`, `hostname`, `pwd`, `sleep`, and `yes`.
+
+```sh
+HYPERBENCH_SSH_TEST_CONFIG=/absolute/path/connection.json npm test
+```
+
+Without this environment variable, `npm test` skips the real SSH integration. The test uses temporary workspace state and does not configure or start the SSH server.
+
 ## Unreleased — system views and editing
 
 TypeScript and the production build pass. All 46 backend tests and 19 Chromium workflows pass locally. The browser checks cover visible Hardware/Software switching, type-specific empty states, fitting widely separated components, component creation in the selected view, and cross-type connection edits. All seven outline labels and their dropdown arrows remain within the control at a 390 px viewport width.
@@ -68,4 +82,4 @@ node scripts/verify-package.mjs --registry hyperbench-workspace@0.1.0
 
 The package check installs into a temporary folder and removes it afterward. It requires package-registry access. The GitHub workflow also runs the backend matrix on Linux, macOS and Windows with Node 22/24, plus Chromium on Linux; consult that run for platform results.
 
-The real stdio tests use an independent MCP SDK client process. No claim is made that every named desktop agent was installed or authenticated during this release check. Automatic OCR, hardware bench access, background indexing, and model execution are outside this package.
+The real stdio tests use an independent MCP SDK client process. No claim is made that every named desktop agent was installed or authenticated during this release check. Automatic OCR, background indexing, and model execution are outside this package. The historical release checks above predate the SSH bench feature.

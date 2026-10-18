@@ -26,6 +26,7 @@ import type {
   Repository,
   SystemDraft,
   SystemModel,
+  TestBench,
 } from "../types.ts";
 import {
   boundedInteger,
@@ -38,6 +39,12 @@ import {
   validateSourceReference,
 } from "./repositories.ts";
 import { processDocument, renderDocumentPage } from "./documents.ts";
+import {
+  BENCH_TEST_COMMAND,
+  benchRevision,
+  benchSettings,
+  runBenchCommand,
+} from "./benches.ts";
 
 const MAX_DOCUMENT_BYTES = 32 * 1024 * 1024;
 type Row = Record<string, any>;
@@ -145,8 +152,10 @@ export class Workspace {
       CREATE TABLE IF NOT EXISTS document_pages(documentId TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,page INTEGER NOT NULL,text TEXT NOT NULL,PRIMARY KEY(documentId,page));
       CREATE TABLE IF NOT EXISTS systems(projectId TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,revision INTEGER NOT NULL,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY,projectId TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,baseRevision INTEGER NOT NULL,summary TEXT NOT NULL,body TEXT NOT NULL,createdAt TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS benches(id TEXT PRIMARY KEY,projectId TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,name TEXT NOT NULL,description TEXT NOT NULL,host TEXT NOT NULL,port INTEGER NOT NULL,username TEXT,identityFile TEXT,knownHostsFile TEXT,enabled INTEGER NOT NULL,revision INTEGER NOT NULL,createdAt TEXT NOT NULL,updatedAt TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS repositories_project ON repositories(projectId);
       CREATE INDEX IF NOT EXISTS documents_project ON documents(projectId);
+      CREATE INDEX IF NOT EXISTS benches_project ON benches(projectId);
       CREATE INDEX IF NOT EXISTS drafts_project ON drafts(projectId);`);
   }
 
@@ -200,6 +209,29 @@ export class Workspace {
     );
     if (!document) throw new Error("Document does not exist in this project.");
     return document;
+  }
+  private bench(projectId: string, value: unknown): TestBench {
+    const row = this.get(
+      "SELECT * FROM benches WHERE id=? AND projectId=?",
+      id(value, "Bench ID"),
+      projectId,
+    );
+    if (!row) throw new Error("Bench does not exist in this project.");
+    return this.benchFromRow(row);
+  }
+  private benchFromRow(row: Row): TestBench {
+    return {
+      ...row,
+      username: row.username ?? undefined,
+      identityFile: row.identityFile ?? undefined,
+      knownHostsFile: row.knownHostsFile ?? undefined,
+      enabled: row.enabled === 1,
+    } as TestBench;
+  }
+  private checkBenchRevision(bench: TestBench, value: unknown): void {
+    const expected = benchRevision(value);
+    if (bench.revision !== expected)
+      throw new Error(`Revision conflict: expected ${expected}, but the saved bench is revision ${bench.revision}. Reload before saving.`);
   }
   private system(projectId: string): SystemModel {
     const row = this.get(
@@ -644,6 +676,12 @@ export class Workspace {
       "repositories.files",
       "repositories.read",
       "repositories.search",
+      "benches.list",
+      "benches.add",
+      "benches.update",
+      "benches.remove",
+      "benches.test",
+      "benches.execute",
       "documents.list",
       "documents.import",
       "documents.upload",
@@ -705,6 +743,68 @@ export class Workspace {
             ...(await repositoryDetails(row.path)),
           })),
         );
+      }
+      case "benches.list":
+        return this.all(
+          "SELECT * FROM benches WHERE projectId=? ORDER BY createdAt,id",
+          projectId,
+        ).map((row) => this.benchFromRow(row));
+      case "benches.add": {
+        const settings = benchSettings(args);
+        return this.transaction(() => {
+          this.project(projectId);
+          const now = new Date().toISOString();
+          const bench: TestBench = {
+            ...settings,
+            id: randomUUID(),
+            projectId,
+            revision: 0,
+            createdAt: now,
+            updatedAt: now,
+          };
+          this.db.prepare(
+            "INSERT INTO benches(id,projectId,name,description,host,port,username,identityFile,knownHostsFile,enabled,revision,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          ).run(
+            bench.id, projectId, bench.name, bench.description, bench.host,
+            bench.port, bench.username ?? null, bench.identityFile ?? null,
+            bench.knownHostsFile ?? null, Number(bench.enabled), bench.revision, now, now,
+          );
+          this.db.prepare("UPDATE projects SET updatedAt=? WHERE id=?").run(now, projectId);
+          return bench;
+        });
+      }
+      case "benches.update": {
+        const settings = benchSettings(args);
+        return this.transaction(() => {
+          const current = this.bench(projectId, args.benchId);
+          this.checkBenchRevision(current, args.expectedRevision);
+          const now = new Date().toISOString();
+          this.db.prepare(
+            "UPDATE benches SET name=?,description=?,host=?,port=?,username=?,identityFile=?,knownHostsFile=?,enabled=?,revision=?,updatedAt=? WHERE id=? AND projectId=?",
+          ).run(
+            settings.name, settings.description, settings.host, settings.port,
+            settings.username ?? null, settings.identityFile ?? null, settings.knownHostsFile ?? null,
+            Number(settings.enabled), current.revision + 1, now, current.id, projectId,
+          );
+          this.db.prepare("UPDATE projects SET updatedAt=? WHERE id=?").run(now, projectId);
+          return this.bench(projectId, current.id);
+        });
+      }
+      case "benches.remove":
+        return this.transaction(() => {
+          const bench = this.bench(projectId, args.benchId);
+          this.checkBenchRevision(bench, args.expectedRevision);
+          this.db.prepare("DELETE FROM benches WHERE id=? AND projectId=?").run(bench.id, projectId);
+          this.db.prepare("UPDATE projects SET updatedAt=? WHERE id=?").run(new Date().toISOString(), projectId);
+          return { ok: true };
+        });
+      case "benches.test":
+        return runBenchCommand(this.bench(projectId, args.benchId), BENCH_TEST_COMMAND, 15);
+      case "benches.execute": {
+        const bench = this.bench(projectId, args.benchId);
+        if (!bench.enabled)
+          throw new Error("This bench is disabled for command execution. Enable it in the workspace before running commands.");
+        return runBenchCommand(bench, args.command, args.timeoutSeconds);
       }
       case "repositories.add":
       case "repositories.clone": {

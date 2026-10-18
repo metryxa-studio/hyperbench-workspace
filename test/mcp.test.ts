@@ -13,6 +13,7 @@ import {
   type Project,
   type SystemDraft,
   type SystemModel,
+  type TestBench,
 } from "../src/types.js";
 async function connected(scope?: string) {
   const calls: { method: string; args: Args }[] = [];
@@ -103,16 +104,18 @@ test("MCP forwards exact line range to the scoped workspace", async () => {
     await x.close();
   }
 });
-test("MCP can propose drafts but exposes no save, accept, delete or shell tool", async () => {
+test("MCP exposes draft proposals and bench execution without saved-state management tools", async () => {
   const x = await connected("a");
   try {
     const tools = await x.client.listTools();
     assert.equal(
       tools.tools.filter((t) => t.annotations?.readOnlyHint === false).length,
-      1,
+      2,
     );
     assert.equal(
-      tools.tools.some((t) => /save|accept|delete|shell|execute/.test(t.name)),
+      tools.tools.some((t) =>
+        /save|accept|delete|shell|bench_add|bench_update|bench_remove/.test(t.name),
+      ),
       false,
     );
     await x.client.callTool({
@@ -127,6 +130,167 @@ test("MCP can propose drafts but exposes no save, accept, delete or shell tool",
     assert.equal(x.calls[0].method, "drafts.propose");
   } finally {
     await x.close();
+  }
+});
+test("MCP bench execution advertises remote side effects and fixed probes advertise remote access", async () => {
+  const x = await connected("a");
+  try {
+    const tools = (await x.client.listTools()).tools;
+    assert.deepEqual(
+      tools
+        .filter((tool) => tool.name.includes("bench"))
+        .map((tool) => tool.name)
+        .sort(),
+      ["bench_execute", "bench_test", "list_benches"],
+    );
+    assert.deepEqual(
+      tools.find((tool) => tool.name === "bench_execute")?.annotations,
+      {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    );
+    assert.deepEqual(
+      tools.find((tool) => tool.name === "bench_test")?.annotations,
+      {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    );
+    assert.equal(
+      tools.find((tool) => tool.name === "list_benches")?.annotations?.openWorldHint,
+      false,
+    );
+  } finally {
+    await x.close();
+  }
+});
+test("MCP project context includes benches and remote tools reject another project before dispatch", async () => {
+  const x = await connected("a");
+  try {
+    const result = await x.client.callTool({
+      name: "project_context",
+      arguments: { projectId: "a" },
+    });
+    assert.deepEqual(
+      JSON.parse((result.content as { text: string }[])[0]!.text).benches,
+      { ok: true },
+    );
+    assert.ok(x.calls.some((call) => call.method === "benches.list"));
+    const count = x.calls.length;
+    for (const name of ["list_benches", "bench_test", "bench_execute"]) {
+      const rejected = await x.client.callTool({
+        name,
+        arguments: { projectId: "b", benchId: "bench", command: "printf safe" },
+      });
+      assert.equal(rejected.isError, true);
+      assert.match(
+        (rejected.content as { text: string }[])[0]!.text,
+        /restricted/u,
+      );
+    }
+    assert.equal(x.calls.length, count);
+    const args = {
+      projectId: "a",
+      benchId: "bench",
+      command: "printf safe",
+      timeoutSeconds: 12,
+    };
+    await x.client.callTool({ name: "bench_execute", arguments: args });
+    assert.deepEqual(x.calls.at(-1), {
+      method: "benches.execute",
+      args,
+    });
+  } finally {
+    await x.close();
+  }
+});
+test("MCP rejects invalid bench commands and timeout bounds before dispatch", async () => {
+  const x = await connected("a");
+  try {
+    for (const args of [
+      { command: "" },
+      { command: "x".repeat(32_769) },
+      { command: "true", timeoutSeconds: 0 },
+      { command: "true", timeoutSeconds: 301 },
+      { command: "true", timeoutSeconds: 1.5 },
+    ]) {
+      const result = await x.client.callTool({
+        name: "bench_execute",
+        arguments: { projectId: "a", benchId: "bench", ...args },
+      });
+      assert.equal(result.isError, true);
+    }
+    assert.equal(x.calls.length, 0);
+  } finally {
+    await x.close();
+  }
+});
+test("MCP enforces disabled benches and bench ownership through the real workspace", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "hyperbench-mcp-benches-"));
+  const workspace = new Workspace(directory);
+  const project = (await workspace.call("projects.create", {
+    name: "Test bench project",
+  })) as Project;
+  const other = (await workspace.call("projects.create", {
+    name: "Other project",
+  })) as Project;
+  const bench = (await workspace.call("benches.add", {
+    projectId: project.id,
+    name: "Disabled bench",
+    host: "127.0.0.1",
+  })) as TestBench;
+  const server = createMcpServer(workspace);
+  const client = new Client({ name: "bench-test-agent", version: "1.0.0" });
+  t.after(async () => {
+    await client.close();
+    await server.close();
+    workspace.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const listed = await client.callTool({
+    name: "list_benches",
+    arguments: { projectId: project.id },
+  });
+  assert.deepEqual(
+    JSON.parse((listed.content as { text: string }[])[0]!.text),
+    JSON.parse(JSON.stringify([bench])),
+  );
+  const isolated = await client.callTool({
+    name: "list_benches",
+    arguments: { projectId: other.id },
+  });
+  assert.deepEqual(
+    JSON.parse((isolated.content as { text: string }[])[0]!.text),
+    [],
+  );
+  const disabled = await client.callTool({
+    name: "bench_execute",
+    arguments: { projectId: project.id, benchId: bench.id, command: "printf safe" },
+  });
+  assert.equal(disabled.isError, true);
+  assert.match(
+    (disabled.content as { text: string }[])[0]!.text,
+    /disabled|enable/iu,
+  );
+  for (const name of ["bench_test", "bench_execute"]) {
+    const foreign = await client.callTool({
+      name,
+      arguments: { projectId: other.id, benchId: bench.id, command: "printf safe" },
+    });
+    assert.equal(foreign.isError, true);
+    assert.match(
+      (foreign.content as { text: string }[])[0]!.text,
+      /not found|project|belong/iu,
+    );
   }
 });
 test("MCP page returns image content and useful page metadata", async () => {
