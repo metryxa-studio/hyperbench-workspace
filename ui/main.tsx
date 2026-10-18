@@ -48,11 +48,33 @@ function App() {
   const projectRef = useRef<string | null>(null);
   const loadGeneration = useRef(0);
   const systemRef = useRef(system);
+  const savedSystemRef = useRef(savedSystem);
+  const savingRef = useRef(saving);
   systemRef.current = system;
+  savedSystemRef.current = savedSystem;
+  savingRef.current = saving;
   const dirty =
     system !== null &&
     savedSystem !== null &&
     JSON.stringify(system) !== JSON.stringify(savedSystem);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  function updateSystem(next: SystemModel | null) {
+    systemRef.current = next;
+    dirtyRef.current =
+      next !== null &&
+      savedSystemRef.current !== null &&
+      JSON.stringify(next) !== JSON.stringify(savedSystemRef.current);
+    setSystem(next);
+  }
+  function updateSavedSystem(next: SystemModel | null) {
+    savedSystemRef.current = next;
+    dirtyRef.current =
+      systemRef.current !== null &&
+      next !== null &&
+      JSON.stringify(systemRef.current) !== JSON.stringify(next);
+    setSavedSystem(next);
+  }
   const notify = (text: string) => {
     setToast(text);
     window.setTimeout(() => setToast(""), 3500);
@@ -73,8 +95,8 @@ function App() {
     setBusy(true);
     setError("");
     setModal(null);
-    setSystem(null);
-    setSavedSystem(null);
+    updateSystem(null);
+    updateSavedSystem(null);
     setDrafts([]);
     setRepositories([]);
     setDocuments([]);
@@ -93,8 +115,8 @@ function App() {
         return;
       setRepositories(repos);
       setDocuments(docs);
-      setSystem(model);
-      setSavedSystem(model);
+      updateSystem(model);
+      updateSavedSystem(model);
       setDrafts(nextDrafts);
     } catch (e) {
       if (
@@ -134,13 +156,47 @@ function App() {
     let active = true,
       pending = false;
     const poll = async () => {
-      if (pending || document.visibilityState === "hidden") return;
+      if (
+        pending ||
+        !active ||
+        projectRef.current !== project.id ||
+        document.visibilityState === "hidden"
+      )
+        return;
       pending = true;
+      const generation = loadGeneration.current;
+      const snapshot = systemRef.current;
+      const baseline = savedSystemRef.current;
+      const refreshSystem =
+        snapshot !== null &&
+        baseline !== null &&
+        !dirtyRef.current &&
+        !savingRef.current;
       try {
-        const items = await call<SystemDraft[]>("drafts.list", {
-          projectId: project.id,
-        });
-        if (active) setDrafts(items);
+        const [items, fresh] = await Promise.all([
+          call<SystemDraft[]>("drafts.list", { projectId: project.id }),
+          refreshSystem
+            ? call<SystemModel>("system.get", { projectId: project.id })
+            : Promise.resolve(null),
+        ]);
+        if (
+          !active ||
+          projectRef.current !== project.id ||
+          generation !== loadGeneration.current
+        )
+          return;
+        setDrafts(items);
+        if (
+          fresh &&
+          systemRef.current === snapshot &&
+          savedSystemRef.current === baseline &&
+          !dirtyRef.current &&
+          !savingRef.current &&
+          fresh.revision !== baseline?.revision
+        ) {
+          updateSystem(fresh);
+          updateSavedSystem(fresh);
+        }
       } catch {
         /* Manual actions surface API failures. */
       } finally {
@@ -176,29 +232,56 @@ function App() {
     }
   }
   async function saveSystem() {
-    if (!system || !savedSystem || !project || saving) return;
+    if (!system || !savedSystem || !project || savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setError("");
+    const generation = loadGeneration.current;
     const snapshot = system;
+    const ports = new Map(
+      snapshot.components.map((item) => [item.id, item.ports]),
+    );
+    // Reconcile endpoints after editing, so partial typing cannot drop a valid link.
+    const payload = {
+      ...snapshot,
+      connections: snapshot.connections.map((item) => {
+        const next = { ...item };
+        if (next.fromPort && !ports.get(next.from)?.includes(next.fromPort))
+          delete next.fromPort;
+        if (next.toPort && !ports.get(next.to)?.includes(next.toPort))
+          delete next.toPort;
+        return next;
+      }),
+    };
     try {
       const saved = await call<SystemModel>("system.save", {
         projectId: project.id,
-        system: snapshot,
+        system: payload,
         expectedRevision: savedSystem.revision,
       });
-      if (projectRef.current !== project.id) return;
-      setSavedSystem(saved);
-      setSystem((current) =>
+      if (
+        projectRef.current !== project.id ||
+        generation !== loadGeneration.current
+      )
+        return;
+      const current = systemRef.current;
+      updateSavedSystem(saved);
+      updateSystem(
         current === snapshot
           ? saved
           : current && { ...current, revision: saved.revision },
       );
       notify("System saved");
     } catch (e) {
-      setError(
-        `${message(e)} Your edits are still here. Discard to reload the latest saved system, or keep editing.`,
-      );
+      if (
+        projectRef.current === project.id &&
+        generation === loadGeneration.current
+      )
+        setError(
+          `${message(e)} Your edits are still here. Discard to reload the latest saved system, or keep editing.`,
+        );
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
@@ -209,43 +292,62 @@ function App() {
     )
       return;
     const snapshot = systemRef.current;
+    const generation = loadGeneration.current;
     try {
       const fresh = await call<SystemModel>("system.get", {
         projectId: project.id,
       });
-      if (projectRef.current === project.id && systemRef.current === snapshot) {
-        setSystem(fresh);
-        setSavedSystem(fresh);
+      if (
+        projectRef.current === project.id &&
+        generation === loadGeneration.current &&
+        systemRef.current === snapshot
+      ) {
+        updateSystem(fresh);
+        updateSavedSystem(fresh);
         setError("");
       }
     } catch (e) {
       setError(message(e));
     }
   }
-  async function acceptDraft(draft: SystemDraft) {
-    if (!project || !savedSystem) return;
+  async function acceptDraft(draft: SystemDraft): Promise<boolean> {
+    if (!project || !savedSystem || savingRef.current) return false;
     if (
       dirty &&
       !window.confirm(
         "Accepting this draft will replace your unsaved system edits. Continue?",
       )
     )
-      return;
+      return false;
+    savingRef.current = true;
+    setSaving(true);
+    const generation = loadGeneration.current;
     const snapshot = systemRef.current;
-    const next = await call<SystemModel>("drafts.accept", {
-      projectId: project.id,
-      draftId: draft.id,
-      expectedRevision: savedSystem.revision,
-    });
-    if (projectRef.current !== project.id) return;
-    setSystem((current) =>
-      current === snapshot
-        ? next
-        : current && { ...current, revision: next.revision },
-    );
-    setSavedSystem(next);
-    setDrafts((items) => items.filter((item) => item.id !== draft.id));
-    notify("Agent draft accepted and saved");
+    try {
+      const next = await call<SystemModel>("drafts.accept", {
+        projectId: project.id,
+        draftId: draft.id,
+        expectedRevision: savedSystem.revision,
+      });
+      if (
+        projectRef.current !== project.id ||
+        generation !== loadGeneration.current
+      )
+        return false;
+      const current = systemRef.current;
+      updateSystem(
+        current === snapshot
+          ? next
+          : current && { ...current, revision: next.revision },
+      );
+      updateSavedSystem(next);
+      setDrafts((items) => items.filter((item) => item.id !== draft.id));
+      notify("Agent draft accepted and saved");
+      return true;
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   }
   async function deleteDraft(draft: SystemDraft) {
     if (!project) return;
@@ -285,8 +387,8 @@ function App() {
       if (project?.id === item.id) {
         projectRef.current = null;
         setProject(null);
-        setSystem(null);
-        setSavedSystem(null);
+        updateSystem(null);
+        updateSavedSystem(null);
         if (remaining[0]) await chooseProject(remaining[0], true);
       }
     } catch (e) {
@@ -408,7 +510,7 @@ function App() {
                 project={project}
                 system={system}
                 savedSystem={savedSystem!}
-                onChange={setSystem}
+                onChange={updateSystem}
                 repositories={repositories}
                 documents={documents}
                 dirty={dirty}
@@ -428,7 +530,7 @@ function App() {
                 repositories={repositories}
                 onRefresh={refreshContext}
                 system={system}
-                onSystemChange={setSystem}
+                onSystemChange={updateSystem}
                 notify={notify}
               />
             )}
@@ -440,7 +542,7 @@ function App() {
                 repositories={repositories}
                 onRefresh={refreshContext}
                 system={system}
-                onSystemChange={setSystem}
+                onSystemChange={updateSystem}
                 notify={notify}
               />
             )}

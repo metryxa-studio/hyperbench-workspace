@@ -499,10 +499,26 @@ button svg {
   flex-wrap: wrap;
   gap: 10px;
 }
-.outline-select {
-  width: auto;
+.outline-control {
+  position: relative;
+  width: 200px;
   max-width: 100%;
-  padding: 7px 10px;
+  flex-shrink: 0;
+}
+.outline-select {
+  appearance: none;
+  width: 100%;
+  min-height: 36px;
+  line-height: 20px;
+  padding: 7px 36px 7px 12px;
+}
+.outline-control > svg {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--text-secondary);
 }
 .filter-tabs {
   display: flex;
@@ -524,6 +540,7 @@ button svg {
   background: var(--border);
   border-color: var(--border-strong);
   color: var(--text);
+  font-weight: 600;
 }
 .filter-tabs button:hover {
   color: var(--text);
@@ -735,17 +752,6 @@ button svg {
   font-size: 18px;
   color: var(--text);
   font-weight: 500;
-}
-.canvas-filter-empty {
-  position: absolute;
-  left: 50%;
-  top: 45%;
-  transform: translate(-50%, -50%);
-  font-size: 14px;
-  color: var(--text);
-  text-align: center;
-  padding: 20px;
-  width: 100%;
 }
 .zoom-controls {
   position: absolute;

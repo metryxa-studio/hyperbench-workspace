@@ -1,5 +1,13 @@
 # Validation
 
+## Unreleased — system views and editing
+
+TypeScript and the production build pass. All 46 backend tests and 19 Chromium workflows pass locally. The browser checks cover visible Hardware/Software switching, type-specific empty states, fitting widely separated components, component creation in the selected view, and cross-type connection edits. All seven outline labels and their dropdown arrows remain within the control at a 390 px viewport width.
+
+The added save checks exercise real keystrokes in port lists, shortcut saves, removed port references, constrained endpoint choices, canceled draft acceptance, and read-only draft previews. Concurrent-save tests verify that an external update refreshes a clean browser but never replaces pending edits, including when its response arrives after editing starts. Browser clicks also exercised the final dropdown, view switching, component creation, and connection-port selection in an isolated local workspace.
+
+These source changes have not been published to npm. The registry release remains 0.1.0; the existing 0.1.1 GitHub archive predates these fixes.
+
 ## 0.1.1 — diagram outlines
 
 The outline update passes TypeScript, 46 backend tests on Node 22 and 26, and 11 Chromium workflows. The added checks cover all seven layout choices, save/reload/discard, unchanged graph and evidence links, read-only draft previews, panning and node dragging, and fitting every outline in a 390 px viewport. Drone, robot-arm, and truck artwork was also inspected in the browser. An independent code review found no introduced issues.
@@ -55,7 +63,7 @@ npx playwright install chromium
 npm run test:ui
 npm pack
 node scripts/verify-package.mjs hyperbench-workspace-0.1.1.tgz
-node scripts/verify-package.mjs --registry hyperbench-workspace@0.1.1
+node scripts/verify-package.mjs --registry hyperbench-workspace@0.1.0
 ```
 
 The package check installs into a temporary folder and removes it afterward. It requires package-registry access. The GitHub workflow also runs the backend matrix on Linux, macOS and Windows with Node 22/24, plus Chromium on Linux; consult that run for platform results.

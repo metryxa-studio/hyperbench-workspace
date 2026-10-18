@@ -35,6 +35,88 @@ const outlineLabels: Record<SystemLayout, string> = {
   truck: "Truck",
 };
 
+function parsePorts(value: string) {
+  return [
+    ...new Set(
+      value
+        .split(",")
+        .map((port) => port.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
+function PortsInput({
+  id,
+  ports,
+  readOnly,
+  onChange,
+}: {
+  id?: string;
+  ports: string[];
+  readOnly: boolean;
+  onChange: (ports: string[]) => void;
+}) {
+  const canonical = ports.join(", ");
+  const [text, setText] = useState(canonical);
+  useEffect(() => {
+    setText((current) =>
+      !readOnly && parsePorts(current).join(", ") === canonical
+        ? current
+        : canonical,
+    );
+  }, [canonical, readOnly]);
+  return (
+    <input
+      id={id}
+      aria-label="Ports"
+      value={text}
+      readOnly={readOnly}
+      onChange={(event) => {
+        setText(event.target.value);
+        onChange(parsePorts(event.target.value));
+      }}
+      onBlur={() => setText(canonical)}
+      placeholder="UART, I2C, power"
+    />
+  );
+}
+
+function PortSelect({
+  id,
+  value,
+  ports,
+  readOnly,
+  onChange,
+}: {
+  id?: string;
+  value?: string;
+  ports: string[];
+  readOnly: boolean;
+  onChange: (value: string | undefined) => void;
+}) {
+  return (
+    <select
+      id={id}
+      value={value || ""}
+      disabled={readOnly}
+      onChange={(event) => onChange(event.target.value || undefined)}
+    >
+      <option value="">None</option>
+      {value && !ports.includes(value) && (
+        <option value={value} disabled>
+          {value} (removed)
+        </option>
+      )}
+      {ports.map((port) => (
+        <option key={port} value={port}>
+          {port}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 interface Props {
   project: Project;
   system: SystemModel;
@@ -47,7 +129,7 @@ interface Props {
   onSave: () => void;
   onDiscard: () => void;
   drafts: SystemDraft[];
-  onAcceptDraft: (draft: SystemDraft) => Promise<void>;
+  onAcceptDraft: (draft: SystemDraft) => Promise<boolean>;
   onDeleteDraft: (draft: SystemDraft) => Promise<void>;
   onNavigate: (view: "repositories" | "documents") => void;
 }
@@ -70,7 +152,7 @@ export function SystemView(props: Props) {
     onNavigate,
   } = props;
   const [selection, setSelection] = useState<Selection>(null);
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState<"all" | Component["kind"]>("all");
   const [viewport, setViewport] = useState({ x: 80, y: 90, scale: 1 });
   const [modal, setModal] = useState<
     "component" | "connection" | "evidence" | "drafts" | null
@@ -96,30 +178,40 @@ export function SystemView(props: Props) {
     scale: number;
   } | null>(null);
   const displayed = draft?.system || system;
-  const hasOutline = displayed.layout !== "blank";
-  const component =
-    selection?.type === "component"
-      ? displayed.components.find((item) => item.id === selection.id)
-      : undefined;
-  const connection =
-    selection?.type === "connection"
-      ? displayed.connections.find((item) => item.id === selection.id)
-      : undefined;
-  const selected = component || connection;
+  const hasOutline = filter === "all" && displayed.layout !== "blank";
   const visibleComponents = displayed.components.filter(
     (item) => filter === "all" || item.kind === filter,
   );
+  const visibleIds = new Set(visibleComponents.map((item) => item.id));
+  const component =
+    selection?.type === "component"
+      ? visibleComponents.find((item) => item.id === selection.id)
+      : undefined;
+  const connection =
+    selection?.type === "connection"
+      ? displayed.connections.find(
+          (item) =>
+            item.id === selection.id &&
+            visibleIds.has(item.from) &&
+            visibleIds.has(item.to),
+        )
+      : undefined;
+  const selected = component || connection;
   const readOnly = !!draft;
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === "s") {
         event.preventDefault();
-        if (dirty && !saving) onSave();
+        if (dirty && !saving && !readOnly) onSave();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [dirty, saving, onSave]);
+  }, [dirty, saving, readOnly, onSave]);
+  function openComponent() {
+    setKind(filter === "all" ? "hardware" : filter);
+    setModal("component");
+  }
   const updateComponent = (update: Partial<Component>) => {
     if (!component || readOnly) return;
     onChange({
@@ -128,15 +220,20 @@ export function SystemView(props: Props) {
         item.id === component.id ? { ...item, ...update } : item,
       ),
     });
+    if (update.kind && filter !== "all" && update.kind !== filter)
+      setFilter(update.kind);
   };
   const updateConnection = (update: Partial<Connection>) => {
     if (!connection || readOnly) return;
+    const next = { ...connection, ...update };
     onChange({
       ...system,
       connections: system.connections.map((item) =>
-        item.id === connection.id ? { ...item, ...update } : item,
+        item.id === connection.id ? next : item,
       ),
     });
+    if (!visibleIds.has(next.from) || !visibleIds.has(next.to))
+      setFilter("all");
   };
   function addComponent(e: React.FormEvent) {
     e.preventDefault();
@@ -170,6 +267,7 @@ export function SystemView(props: Props) {
       });
     }
     onChange({ ...system, components: [...system.components, item] });
+    if (filter !== "all" && filter !== kind) setFilter(kind);
     setSelection({ type: "component", id: item.id });
     setModal(null);
     setLabel("");
@@ -197,24 +295,24 @@ export function SystemView(props: Props) {
     setSelection(null);
   }
   function fit() {
-    if ((!displayed.components.length && !hasOutline) || !canvasRef.current) {
+    if ((!visibleComponents.length && !hasOutline) || !canvasRef.current) {
       setViewport({ x: 80, y: 90, scale: 1 });
       return;
     }
     const minX = Math.min(
-        ...displayed.components.map((c) => c.x),
+        ...visibleComponents.map((c) => c.x),
         ...(hasOutline ? [OUTLINE_BOUNDS.x] : []),
       ),
       minY = Math.min(
-        ...displayed.components.map((c) => c.y),
+        ...visibleComponents.map((c) => c.y),
         ...(hasOutline ? [OUTLINE_BOUNDS.y] : []),
       );
     const maxX = Math.max(
-        ...displayed.components.map((c) => c.x + 224),
+        ...visibleComponents.map((c) => c.x + 224),
         ...(hasOutline ? [OUTLINE_BOUNDS.width] : []),
       ),
       maxY = Math.max(
-        ...displayed.components.map((c) => c.y + 124),
+        ...visibleComponents.map((c) => c.y + 124),
         ...(hasOutline ? [OUTLINE_BOUNDS.height] : []),
       );
     const rect = canvasRef.current.getBoundingClientRect();
@@ -237,7 +335,7 @@ export function SystemView(props: Props) {
   }
   useLayoutEffect(() => {
     fit();
-  }, [project.id, displayed.layout, draft?.id]);
+  }, [project.id, displayed.layout, draft?.id, filter]);
   function zoom(factor: number) {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -326,7 +424,7 @@ export function SystemView(props: Props) {
     setWorking(true);
     setError("");
     try {
-      await onAcceptDraft(item);
+      if (!(await onAcceptDraft(item))) return;
       setDraft(null);
       setModal(null);
       setSelection(null);
@@ -365,7 +463,7 @@ export function SystemView(props: Props) {
             icon="plus"
             variant="primary"
             disabled={readOnly}
-            onClick={() => setModal("component")}
+            onClick={openComponent}
           >
             Add component
           </Button>
@@ -373,27 +471,32 @@ export function SystemView(props: Props) {
       </div>
       <div className="canvas-toolbar">
         <div className="canvas-view-controls">
-          <select
-            className="outline-select"
-            aria-label="Device outline"
-            value={displayed.layout}
-            disabled={readOnly || saving}
-            onChange={(event) =>
-              onChange({
-                ...system,
-                layout: event.target.value as SystemLayout,
-              })
-            }
-          >
-            {SYSTEM_LAYOUTS.map((layout) => (
-              <option key={layout} value={layout}>
-                {outlineLabels[layout]}
-              </option>
-            ))}
-          </select>
+          {filter === "all" && (
+            <div className="outline-control">
+              <select
+                className="outline-select"
+                aria-label="Device outline"
+                value={displayed.layout}
+                disabled={readOnly || saving}
+                onChange={(event) =>
+                  onChange({
+                    ...system,
+                    layout: event.target.value as SystemLayout,
+                  })
+                }
+              >
+                {SYSTEM_LAYOUTS.map((layout) => (
+                  <option key={layout} value={layout}>
+                    {outlineLabels[layout]}
+                  </option>
+                ))}
+              </select>
+              <Icon name="chevron" />
+            </div>
+          )}
           <div className="filter-tabs" aria-label="Component filter">
             {[
-              ["all", "All components", displayed.components.length],
+              ["all", "Diagram", displayed.components.length],
               ["hardware", "Hardware", counts("hardware")],
               ["software", "Software", counts("software")],
               ["external", "External", counts("external")],
@@ -401,7 +504,11 @@ export function SystemView(props: Props) {
               <button
                 key={value}
                 className={filter === value ? "active" : ""}
-                onClick={() => setFilter(String(value))}
+                aria-pressed={filter === value}
+                onClick={() => {
+                  setSelection(null);
+                  setFilter(value as typeof filter);
+                }}
               >
                 {name}
                 <span>{count}</span>
@@ -413,13 +520,13 @@ export function SystemView(props: Props) {
           <Button
             icon="link"
             variant="ghost"
-            disabled={readOnly || system.components.length < 2}
+            disabled={readOnly || visibleComponents.length < 2}
             onClick={() => {
               const initialFrom =
-                component?.id || system.components[0]?.id || "";
+                component?.id || visibleComponents[0]?.id || "";
               setFrom(initialFrom);
               setTo(
-                system.components.find((c) => c.id !== initialFrom)?.id || "",
+                visibleComponents.find((c) => c.id !== initialFrom)?.id || "",
               );
               setConnectionLabel("");
               setModal("connection");
@@ -510,7 +617,7 @@ export function SystemView(props: Props) {
               transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
             }}
           >
-            <DeviceOutline layout={displayed.layout} />
+            {hasOutline && <DeviceOutline layout={displayed.layout} />}
             <svg
               className="connection-layer"
               width="1"
@@ -675,22 +782,19 @@ export function SystemView(props: Props) {
               </div>
             ))}
           </div>
-          {!displayed.components.length && !hasOutline && (
+          {!visibleComponents.length && !hasOutline && (
             <div className="canvas-empty">
-              <h2>No components</h2>
+              <h2>
+                {filter === "all" ? "No components" : `No ${filter} components`}
+              </h2>
               <Button
                 variant="primary"
                 icon="plus"
-                onClick={() => setModal("component")}
+                onClick={openComponent}
                 disabled={readOnly}
               >
                 Add component
               </Button>
-            </div>
-          )}
-          {displayed.components.length > 0 && !visibleComponents.length && (
-            <div className="canvas-filter-empty">
-              No {filter} components in this system.
             </div>
           )}
           <div className="zoom-controls">
@@ -763,22 +867,11 @@ export function SystemView(props: Props) {
                       />
                     </Field>
                     <Field label="Ports">
-                      <input
-                        value={component.ports.join(", ")}
+                      <PortsInput
+                        key={component.id}
+                        ports={component.ports}
                         readOnly={readOnly}
-                        onChange={(e) =>
-                          updateComponent({
-                            ports: e.target.value
-                              .split(",")
-                              .map((p) => p.trim()),
-                          })
-                        }
-                        onBlur={() =>
-                          updateComponent({
-                            ports: component.ports.filter(Boolean),
-                          })
-                        }
-                        placeholder="UART, I2C, power"
+                        onChange={(ports) => updateComponent({ ports })}
                       />
                     </Field>
                     <div className="field-grid">
@@ -844,25 +937,27 @@ export function SystemView(props: Props) {
                       </select>
                     </Field>
                     <Field label="From port">
-                      <input
+                      <PortSelect
                         readOnly={readOnly}
-                        value={connection.fromPort || ""}
-                        onChange={(e) =>
-                          updateConnection({
-                            fromPort: e.target.value || undefined,
-                          })
+                        value={connection.fromPort}
+                        ports={
+                          displayed.components.find(
+                            (item) => item.id === connection.from,
+                          )?.ports || []
                         }
+                        onChange={(fromPort) => updateConnection({ fromPort })}
                       />
                     </Field>
                     <Field label="To port">
-                      <input
+                      <PortSelect
                         readOnly={readOnly}
-                        value={connection.toPort || ""}
-                        onChange={(e) =>
-                          updateConnection({
-                            toPort: e.target.value || undefined,
-                          })
+                        value={connection.toPort}
+                        ports={
+                          displayed.components.find(
+                            (item) => item.id === connection.to,
+                          )?.ports || []
                         }
+                        onChange={(toPort) => updateConnection({ toPort })}
                       />
                     </Field>
                   </>
@@ -1022,6 +1117,8 @@ export function SystemView(props: Props) {
                 ...system,
                 connections: [...system.connections, item],
               });
+              if (!visibleIds.has(from) || !visibleIds.has(to))
+                setFilter("all");
               setSelection({ type: "connection", id: item.id });
               setModal(null);
             }}

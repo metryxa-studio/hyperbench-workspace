@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Route } from "@playwright/test";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -147,6 +147,84 @@ async function seedConnectedSystem(page: any) {
     }),
   ).toBeVisible();
   return saved;
+}
+
+async function seedMixedSystem(page: any) {
+  await createProject(page);
+  const model = (await workspace.call("system.get", {
+    projectId,
+  })) as SystemModel;
+  const saved = (await workspace.call("system.save", {
+    projectId,
+    expectedRevision: model.revision,
+    system: {
+      ...model,
+      layout: "truck",
+      components: [
+        {
+          id: "controller",
+          label: "Controller",
+          kind: "hardware",
+          description: "Control board",
+          x: -2200,
+          y: 1800,
+          ports: [],
+          evidence: [],
+        },
+        {
+          id: "firmware",
+          label: "Firmware",
+          kind: "software",
+          description: "Control loop",
+          x: 3100,
+          y: -1700,
+          ports: [],
+          evidence: [],
+        },
+        {
+          id: "simulator",
+          label: "Simulator",
+          kind: "external",
+          description: "External simulator",
+          x: 2600,
+          y: 2300,
+          ports: [],
+          evidence: [],
+        },
+      ],
+      connections: [
+        {
+          id: "control",
+          from: "controller",
+          to: "firmware",
+          label: "Runs firmware",
+          evidence: [],
+        },
+      ],
+    },
+  })) as SystemModel;
+  await page.reload();
+  await expect(page.locator(".canvas-node")).toHaveCount(3);
+  return saved;
+}
+
+async function expectNodeInsideCanvas(page: any, name: string) {
+  const node = page.getByRole("button", { name, exact: true });
+  await expect(node).toBeVisible();
+  await expect
+    .poll(async () => {
+      const n = await node.boundingBox(),
+        c = await page.locator(".canvas").boundingBox();
+      return (
+        !!n &&
+        !!c &&
+        n.x >= c.x - 1 &&
+        n.y >= c.y - 1 &&
+        n.x + n.width <= c.x + c.width + 1 &&
+        n.y + n.height <= c.y + c.height + 1
+      );
+    })
+    .toBe(true);
 }
 
 test("onboarding, component editing and save survive browser reload", async ({
@@ -319,6 +397,120 @@ test("an external agent draft is visible for review and only explicit acceptance
   ).toBe("truck");
 });
 
+test("draft previews ignore the save shortcut and canceling acceptance preserves local edits", async ({
+  page,
+}) => {
+  const original = await seedConnectedSystem(page);
+  await page
+    .getByRole("button", {
+      name: "Controller, hardware component",
+      exact: true,
+    })
+    .click();
+  await page.getByLabel("Name", { exact: true }).fill("Unsaved controller");
+  await workspace.call("drafts.propose", {
+    projectId,
+    baseRevision: original.revision,
+    summary: "Rename the board from agent evidence",
+    system: {
+      ...original,
+      components: original.components.map((item) =>
+        item.id === "controller"
+          ? { ...item, label: "Agent controller" }
+          : item,
+      ),
+    },
+  });
+  await page.getByRole("button", { name: /Agent drafts/ }).click();
+  await page.getByRole("button", { name: "Review on canvas" }).click();
+  await expect(page.locator(".draft-review-bar")).toBeVisible();
+  const saves: string[] = [];
+  page.on("request", (request) => {
+    if (
+      request.url().endsWith("/api/call") &&
+      request.postDataJSON()?.method === "system.save"
+    )
+      saves.push(request.url());
+  });
+  await page.keyboard.press("Control+s");
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
+  expect(saves).toEqual([]);
+  expect(await workspace.call("system.get", { projectId })).toEqual(original);
+
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page
+    .getByRole("button", { name: "Accept & save", exact: true })
+    .click();
+  await expect(page.locator(".draft-review-bar")).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: "Agent controller, hardware component",
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(await workspace.call("system.get", { projectId })).toEqual(original);
+  await page
+    .getByRole("button", { name: "Close preview", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", {
+      name: "Unsaved controller, hardware component",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Save", exact: true }),
+  ).toBeEnabled();
+  expect(
+    (await workspace.call("drafts.list", { projectId })) as any[],
+  ).toHaveLength(1);
+});
+
+test("a clean browser receives external system revisions and can accept a new valid draft without reloading", async ({
+  page,
+}) => {
+  const original = await seedConnectedSystem(page);
+  const external = (await workspace.call("system.save", {
+    projectId,
+    expectedRevision: original.revision,
+    system: { ...original, title: "Updated by another client" },
+  })) as SystemModel;
+  await workspace.call("drafts.propose", {
+    projectId,
+    baseRevision: external.revision,
+    summary: "Add the vehicle outline to the latest system",
+    system: { ...external, layout: "truck" },
+  });
+  await expect(
+    page.getByRole("heading", {
+      name: "Updated by another client",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /Agent drafts/ }).click();
+  await page.getByRole("button", { name: "Review on canvas" }).click();
+  await expect(
+    page.getByRole("button", { name: "Accept & save", exact: true }),
+  ).toBeEnabled();
+  await page
+    .getByRole("button", { name: "Accept & save", exact: true })
+    .click();
+  await expect(page.locator(".draft-review-bar")).toHaveCount(0);
+  const saved = (await workspace.call("system.get", {
+    projectId,
+  })) as SystemModel;
+  expect(saved.revision).toBe(external.revision + 1);
+  expect(saved.title).toBe(external.title);
+  expect(saved.layout).toBe("truck");
+  expect(saved.components).toEqual(original.components);
+  expect(saved.connections).toEqual(original.connections);
+});
+
 test("stale external edits cannot overwrite a browser draft", async ({
   page,
 }) => {
@@ -330,6 +522,23 @@ test("stale external edits cannot overwrite a browser draft", async ({
     expectedRevision: 0,
     system: { ...latest, title: "Updated elsewhere" },
   });
+  await page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/call") &&
+      response.request().postDataJSON()?.method === "drafts.list",
+  );
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
+  await expect(
+    page.getByRole("button", {
+      name: "Unsaved controller, hardware component",
+      exact: true,
+    }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Revision conflict");
   expect(
@@ -338,6 +547,85 @@ test("stale external edits cannot overwrite a browser draft", async ({
   await expect(
     page.getByText("Unsaved controller", { exact: true }).first(),
   ).toBeVisible();
+});
+
+test("an in-flight clean refresh cannot replace new local edits or advance their save baseline", async ({
+  page,
+}) => {
+  await createProject(page);
+  const original = (await workspace.call("system.get", {
+    projectId,
+  })) as SystemModel;
+  expect(original.revision).toBe(0);
+
+  let notifyHeld!: () => void,
+    release!: () => void,
+    held = false;
+  const responseHeld = new Promise<void>((resolve) => {
+    notifyHeld = resolve;
+  });
+  const releaseResponse = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const holdRefresh = async (route: Route) => {
+    if (held || route.request().postDataJSON()?.method !== "system.get") {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const body = await response.json();
+    if (body.result?.revision === 1) {
+      held = true;
+      notifyHeld();
+      await releaseResponse;
+    }
+    await route.fulfill({ response });
+  };
+  await page.route("**/api/call", holdRefresh);
+  try {
+    const external = (await workspace.call("system.save", {
+      projectId,
+      expectedRevision: 0,
+      system: { ...original, title: "External revision" },
+    })) as SystemModel;
+    await responseHeld;
+    await component(page, "Edited during refresh");
+    await expect(
+      page.getByRole("button", { name: "Save", exact: true }),
+    ).toBeEnabled();
+
+    const delivered = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/call") &&
+        response.request().postDataJSON()?.method === "system.get",
+    );
+    release();
+    await delivered;
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
+    await expect(
+      page.getByRole("button", {
+        name: "Edited during refresh, hardware component",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("Revision conflict");
+    expect(await workspace.call("system.get", { projectId })).toEqual(external);
+    await expect(
+      page.getByRole("button", {
+        name: "Edited during refresh, hardware component",
+        exact: true,
+      }),
+    ).toBeVisible();
+  } finally {
+    release();
+    await page.unrouteAll({ behavior: "wait" });
+  }
 });
 
 test("PDF pages render, extracted text is readable and original download preserves bytes", async ({
@@ -405,24 +693,134 @@ test("connections save when optional ports are cleared or endpoints change", asy
   await dialog
     .getByRole("button", { name: "Add connection", exact: true })
     .click();
-  await page.getByLabel("From port", { exact: true }).fill("TX");
-  await page.getByLabel("To port", { exact: true }).fill("RX");
+  const fromPort = page.getByRole("combobox", {
+    name: "From port",
+    exact: true,
+  });
+  const toPort = page.getByRole("combobox", { name: "To port", exact: true });
+  await expect(fromPort.locator("option")).toHaveText(["None", "TX"]);
+  await expect(toPort.locator("option")).toHaveText(["None", "RX"]);
+  await fromPort.selectOption("TX");
+  await toPort.selectOption("RX");
+  await expect(
+    fromPort.selectOption("undeclared-port", { timeout: 250 }),
+  ).rejects.toThrow();
+  await expect(fromPort).toHaveValue("TX");
+  await expect(toPort).toHaveValue("RX");
   await save(page);
-  await page.getByLabel("From port", { exact: true }).fill("");
+  await fromPort.selectOption("");
   await save(page);
   let saved: any = await workspace.call("system.get", { projectId });
   expect(saved.connections[0].fromPort).toBeUndefined();
-  await page.getByLabel("From port", { exact: true }).fill("TX");
+  await fromPort.selectOption("TX");
   await page
     .getByLabel("From", { exact: true })
     .selectOption({ label: "Sensor" });
   await page
     .getByLabel("To", { exact: true })
     .selectOption({ label: "Controller" });
+  await expect(fromPort.locator("option")).toHaveText(["None", "RX"]);
+  await expect(toPort.locator("option")).toHaveText(["None", "TX"]);
+  await expect(fromPort).toHaveValue("");
+  await expect(toPort).toHaveValue("");
   await save(page);
   saved = await workspace.call("system.get", { projectId });
   expect(saved.connections[0].fromPort).toBeUndefined();
   expect(saved.connections[0].toPort).toBeUndefined();
+});
+
+test("component ports normalize before shortcut saves and remove stale connection endpoints without losing evidence", async ({
+  page,
+}) => {
+  const original = await seedConnectedSystem(page);
+  await page
+    .getByRole("button", {
+      name: "Controller, hardware component",
+      exact: true,
+    })
+    .click();
+  const ports = page.getByLabel("Ports", { exact: true });
+  await ports.fill("");
+  await ports.pressSequentially("TX, SPI");
+  await page.keyboard.press("Control+s");
+  await expect(ports).toBeFocused();
+  await expect
+    .poll(async () => {
+      const saved = (await workspace.call("system.get", {
+        projectId,
+      })) as SystemModel;
+      return saved.components.find((item) => item.id === "controller")?.ports;
+    })
+    .toEqual(["TX", "SPI"]);
+  await expect(
+    page.getByRole("button", { name: "Save", exact: true }),
+  ).toBeDisabled();
+  let saved = (await workspace.call("system.get", {
+    projectId,
+  })) as SystemModel;
+  expect(saved.connections[0].fromPort).toBe("TX");
+
+  await ports.fill("TX, , TX, SPI, I2C, ");
+  await page.keyboard.press("Control+s");
+  await expect(ports).toBeFocused();
+  await expect
+    .poll(async () => {
+      const current = (await workspace.call("system.get", {
+        projectId,
+      })) as SystemModel;
+      return current.components.find((item) => item.id === "controller")?.ports;
+    })
+    .toEqual(["TX", "SPI", "I2C"]);
+  await expect(
+    page.getByRole("button", { name: "Save", exact: true }),
+  ).toBeDisabled();
+  saved = (await workspace.call("system.get", { projectId })) as SystemModel;
+  expect(saved.connections[0].fromPort).toBe("TX");
+
+  await ports.fill("SPI, , SPI,");
+  await page.keyboard.press("Control+s");
+  await expect(ports).toBeFocused();
+  await expect
+    .poll(async () => {
+      const current = (await workspace.call("system.get", {
+        projectId,
+      })) as SystemModel;
+      return current.components.find((item) => item.id === "controller")?.ports;
+    })
+    .toEqual(["SPI"]);
+  await expect(
+    page.getByRole("button", { name: "Save", exact: true }),
+  ).toBeDisabled();
+  saved = (await workspace.call("system.get", { projectId })) as SystemModel;
+  expect(saved.connections[0].fromPort).toBeUndefined();
+  expect(saved.connections[0].toPort).toBe("RX");
+
+  await page
+    .getByRole("button", {
+      name: "Temperature sensor, hardware component",
+      exact: true,
+    })
+    .click();
+  await ports.fill("I2C, I2C, ,");
+  await page.keyboard.press("Control+s");
+  await expect
+    .poll(async () => {
+      const current = (await workspace.call("system.get", {
+        projectId,
+      })) as SystemModel;
+      return current.components.find((item) => item.id === "sensor")?.ports;
+    })
+    .toEqual(["I2C"]);
+  await expect(
+    page.getByRole("button", { name: "Save", exact: true }),
+  ).toBeDisabled();
+  saved = (await workspace.call("system.get", { projectId })) as SystemModel;
+  const { fromPort, toPort, ...originalConnection } = original.connections[0];
+  expect(saved.connections).toEqual([originalConnection]);
+  expect(saved.components[0].evidence).toEqual(original.components[0].evidence);
+  expect(saved.components[1].evidence).toEqual(original.components[1].evidence);
+  expect(saved.links).toEqual(original.links);
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
 test("narrow layout keeps navigation, editing and save reachable", async ({
@@ -528,6 +926,237 @@ test("device outlines preserve the complete system through switching, saving, re
   expect(saved.links).toEqual(original.links);
 });
 
+test("component views fit their own nodes, hide unrelated selections and preserve the saved graph", async ({
+  page,
+}) => {
+  const original = await seedMixedSystem(page);
+  const modes = [
+    ["Hardware", "Controller, hardware component"],
+    ["Software", "Firmware, software component"],
+    ["External", "Simulator, external component"],
+  ];
+  for (const [mode, name] of modes) {
+    const button = page.getByRole("button", { name: new RegExp(`^${mode}`) });
+    await button.click();
+    await expect(button).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator(".canvas-node")).toHaveCount(1);
+    await expectNodeInsideCanvas(page, name);
+    await expect(page.locator(".device-outline")).toHaveCount(0);
+    await expect(
+      page.getByLabel("Device outline", { exact: true }),
+    ).toHaveCount(0);
+    await expect(page.locator(".canvas-connection")).toHaveCount(0);
+    await expect(page.getByLabel("Name", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name, exact: true }).click();
+    await expect(page.getByLabel("Name", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Save", exact: true }),
+    ).toBeDisabled();
+  }
+  await page.getByRole("button", { name: /^Diagram/ }).click();
+  await expect(page.locator(".canvas-node")).toHaveCount(3);
+  await expect(page.locator(".canvas-connection")).toHaveCount(1);
+  await expect(page.getByLabel("Device outline", { exact: true })).toHaveValue(
+    "truck",
+  );
+  expect(await workspace.call("system.get", { projectId })).toEqual(original);
+});
+
+test("empty hardware and software views replace an outline with a clear type-specific empty state", async ({
+  page,
+}) => {
+  await createProject(page);
+  await page
+    .getByLabel("Device outline", { exact: true })
+    .selectOption("quadrotor");
+  await save(page);
+  const original = await workspace.call("system.get", { projectId });
+  for (const kind of ["hardware", "software", "external"]) {
+    await page
+      .getByRole("button", { name: new RegExp(`^${kind}`, "i") })
+      .click();
+    await expect(
+      page.getByRole("heading", {
+        name: `No ${kind} components`,
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(page.locator(".device-outline")).toHaveCount(0);
+    await expect(
+      page.getByLabel("Device outline", { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Save", exact: true }),
+    ).toBeDisabled();
+  }
+  await page.getByRole("button", { name: /^Diagram/ }).click();
+  await expect(page.locator(".device-outline")).toHaveAttribute(
+    "data-layout",
+    "quadrotor",
+  );
+  await expect(page.getByLabel("Device outline", { exact: true })).toHaveValue(
+    "quadrotor",
+  );
+  expect(await workspace.call("system.get", { projectId })).toEqual(original);
+});
+
+test("adding components defaults to the active view and reveals an explicitly different type", async ({
+  page,
+}) => {
+  await createProject(page);
+  await page.getByRole("button", { name: /^Software/ }).click();
+  await page
+    .getByRole("button", { name: "Add component", exact: true })
+    .first()
+    .click();
+  let dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Type", { exact: true })).toHaveValue(
+    "software",
+  );
+  await dialog.getByLabel("Component name").fill("Flight controller firmware");
+  await dialog
+    .getByRole("button", { name: "Add component", exact: true })
+    .click();
+  await expect(page.getByRole("button", { name: /^Software/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expectNodeInsideCanvas(
+    page,
+    "Flight controller firmware, software component",
+  );
+  await save(page);
+
+  await page
+    .getByRole("button", { name: "Add component", exact: true })
+    .first()
+    .click();
+  dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Type", { exact: true })).toHaveValue(
+    "software",
+  );
+  await dialog.getByLabel("Type", { exact: true }).selectOption("hardware");
+  await dialog.getByLabel("Component name").fill("Flight controller board");
+  await dialog
+    .getByRole("button", { name: "Add component", exact: true })
+    .click();
+  await expectNodeInsideCanvas(
+    page,
+    "Flight controller board, hardware component",
+  );
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
+    "Flight controller board",
+  );
+  await save(page);
+  const saved = (await workspace.call("system.get", {
+    projectId,
+  })) as SystemModel;
+  expect(saved.components.map(({ label, kind }) => ({ label, kind }))).toEqual([
+    { label: "Flight controller firmware", kind: "software" },
+    { label: "Flight controller board", kind: "hardware" },
+  ]);
+});
+
+test("Connect defaults to visible components and creating or editing cross-type edges reveals the diagram", async ({
+  page,
+}) => {
+  const original = await seedConnectedSystem(page);
+  await workspace.call("system.save", {
+    projectId,
+    expectedRevision: original.revision,
+    system: {
+      ...original,
+      components: [
+        ...original.components,
+        {
+          id: "firmware",
+          label: "Firmware",
+          kind: "software",
+          description: "Control loop",
+          x: 300,
+          y: 450,
+          ports: [],
+          evidence: [],
+        },
+        {
+          id: "driver",
+          label: "Sensor driver",
+          kind: "software",
+          description: "Sensor input",
+          x: 650,
+          y: 450,
+          ports: [],
+          evidence: [],
+        },
+      ],
+    },
+  });
+  await page.reload();
+  await page.getByRole("button", { name: /^Hardware/ }).click();
+  await page
+    .getByRole("button", {
+      name: "Connection from Controller to Temperature sensor: Serial",
+      exact: true,
+    })
+    .click();
+  await page.getByLabel("To", { exact: true }).selectOption("firmware");
+  await expect(page.getByRole("button", { name: /^Diagram/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(
+    page.getByRole("button", {
+      name: "Connection from Controller to Firmware: Serial",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Serial");
+  await save(page);
+  await page.getByRole("button", { name: /^Software/ }).click();
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("From", { exact: true })).toHaveValue(
+    "firmware",
+  );
+  await expect(dialog.getByLabel("To", { exact: true })).toHaveValue("driver");
+  await dialog.getByLabel("To", { exact: true }).selectOption("controller");
+  await dialog.getByLabel("Connection label").fill("Controls board");
+  await dialog
+    .getByRole("button", { name: "Add connection", exact: true })
+    .click();
+  await expect(page.getByRole("button", { name: /^Diagram/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(
+    page.getByRole("button", {
+      name: "Connection from Firmware to Controller: Controls board",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue(
+    "Controls board",
+  );
+  await save(page);
+  const saved = (await workspace.call("system.get", {
+    projectId,
+  })) as SystemModel;
+  expect(saved.connections).toHaveLength(2);
+  expect(saved.connections[0]).toMatchObject({
+    from: "controller",
+    to: "firmware",
+    label: "Serial",
+    fromPort: "TX",
+    evidence: original.connections[0].evidence,
+  });
+  expect(saved.connections[0].toPort).toBeUndefined();
+  expect(saved.connections[1]).toMatchObject({
+    from: "firmware",
+    to: "controller",
+    label: "Controls board",
+  });
+});
+
 test("every device outline fits a narrow canvas without hiding the selector or save action", async ({
   page,
 }, testInfo) => {
@@ -562,6 +1191,27 @@ test("every device outline fits a narrow canvas without hiding the selector or s
       })
       .toBe(true);
     await expect(selector).toBeInViewport();
+    const control = await selector.boundingBox();
+    const chevron = await page.locator(".outline-control svg").boundingBox();
+    expect(control).not.toBeNull();
+    expect(chevron).not.toBeNull();
+    const labelGeometry = await selector.evaluate(
+      (element: HTMLSelectElement) => {
+        const style = getComputedStyle(element);
+        const context = document.createElement("canvas").getContext("2d")!;
+        context.font = style.font;
+        return {
+          textWidth: context.measureText(element.selectedOptions[0].text).width,
+          paddingLeft: parseFloat(style.paddingLeft),
+        };
+      },
+    );
+    expect(
+      control!.x + labelGeometry.paddingLeft + labelGeometry.textWidth + 8,
+    ).toBeLessThanOrEqual(chevron!.x);
+    expect(chevron!.x + chevron!.width + 8).toBeLessThanOrEqual(
+      control!.x + control!.width,
+    );
     await expect(
       page.getByRole("button", { name: "Save", exact: true }),
     ).toBeInViewport();
