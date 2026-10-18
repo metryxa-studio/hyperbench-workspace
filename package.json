@@ -1,0 +1,54 @@
+{
+  "name": "hyperbench-workspace",
+  "version": "0.1.0",
+  "description": "Local hardware context, diagrams and documents for your own AI agent. No indexer or cloud service.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "bin": {
+    "hyperbench": "bin/hyperbench.mjs"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "skills",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "docs"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node bin/hyperbench.mjs start",
+    "dev": "tsx src/cli.ts start",
+    "check": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "test:ui": "playwright test",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@napi-rs/canvas": "1.0.11",
+    "pdfjs-dist": "6.4.299",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "esbuild": "^0.28.2",
+    "lucide-react": "1.53.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "tsx": "^4.20.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.4"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/metryxa-studio/hyperbench-workspace.git"
+  }
+}
