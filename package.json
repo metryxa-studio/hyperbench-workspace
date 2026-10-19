@@ -14,11 +14,10 @@
     "bin",
     "dist",
     "skills",
-    "examples",
     "README.md",
     "LICENSE",
     "NOTICE",
-    "docs"
+    "docs/agents.md"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",

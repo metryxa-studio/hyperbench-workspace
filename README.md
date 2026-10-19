@@ -62,17 +62,13 @@ Example requests:
 
 ## SSH test benches
 
-Add a bench to a project with a name, host (or SSH-config alias), and optional description, port, username, identity-file path, and known-hosts-file path. The default port is 22. A bench starts with commands disabled; the fixed **Test connection** probe works while disabled. Enable commands explicitly to allow the browser's command runner and the MCP `bench_execute` tool. Edits and removal check the bench revision to reject stale changes from another browser or process.
+In **Test benches**, register a host or SSH-config alias and test the connection. Commands start disabled; enable them to use the browser command runner or the agent's `bench_execute` tool. Authentication uses your existing SSH key or agent and a verified host key. Hyperbench stores settings and file paths, never passwords or private-key contents.
 
-Authentication uses your existing SSH key or agent. Hyperbench stores connection settings and paths, never password or private-key contents. Password prompts are disabled. First establish and verify the host key using your usual SSH client. Hyperbench requires strict host-key verification and will not accept unknown or changed keys. An optional known-hosts-file path lets you use a separately prepared trust file; identity and known-hosts paths must be absolute or start with `~/`.
-
-Commands run in the remote account's shell and have that account's permissions. They can modify files, restart services, or operate attached hardware. Enabling a bench makes commands available; your agent still owns authorization and tool-approval policy. Use a remote account with permissions appropriate to the bench. Remote output is untrusted data, not agent instructions.
-
-Commands default to a 30-second timeout, configurable from 1 to 300 seconds, with a combined 256 KiB stdout/stderr cap. Results include output, exit status, elapsed time, and timeout/truncation flags. A timeout closes the local SSH process; it does not guarantee that the remote command or its children stop. Nonzero exits and incomplete results must be inspected before claiming a test passed. The connection probe confirms SSH access, not attached hardware health. See [agent setup](docs/agents.md) for MCP usage.
+Commands run with the remote account's permissions and can change files or attached hardware. Your agent retains its authorization and approval policy. A successful connection probe confirms SSH access only; a timeout does not guarantee that remote processes stop. See [agent setup](docs/agents.md#ssh-benches) for authentication, deadlines, output limits, and result handling.
 
 ## Skills
 
-All skill prose is original and provider-independent. They run inside your chosen agent; Hyperbench does not run a model. Remote shell commands are available only through an explicitly enabled test bench.
+Skills run inside your chosen agent; Hyperbench does not run a model. Remote shell commands are available only through an explicitly enabled test bench.
 
 | Skill | Purpose |
 | --- | --- |
@@ -98,9 +94,7 @@ In **Documents → Equipment skills**, select the equipment's datasheets or manu
 
 Drafts retain the imported document names, page ranges, and hashes. A useful skill connects a symptom to evidence, a diagnostic check, and an expected observation. Document-derived instructions remain untested until supported by actual test results. Accepting a draft does not certify the equipment. Generation uses your agent and its model/privacy settings; Hyperbench stores drafts locally and makes no model calls.
 
-The debugging skill also includes [version-specific platform guidance](skills/hardware-debugging/references/platform-evidence.md) and an [equipment authoring workflow](skills/hardware-debugging/references/equipment-skills.md). [IoT-SkillsBench](https://arxiv.org/abs/2603.19583) informed the emphasis on concrete platform evidence and observable checks. Its expert authors had access to failure observations that its generated-skill authors did not; its results are not a performance claim for Hyperbench. No benchmark code, skill text, or task data is included.
-
-Try the [equipment debugging example](examples/equipment-skill/README.md) with a fictional device specification and runnable host checks. It needs no hardware or additional packages.
+The debugging skill also includes [version-specific platform guidance](skills/hardware-debugging/references/platform-evidence.md) and an [equipment authoring workflow](skills/hardware-debugging/references/equipment-skills.md).
 
 ## Agent connection
 
@@ -158,9 +152,18 @@ npm test
 npx playwright install chromium
 npm run test:ui
 npm pack
+node scripts/verify-package.mjs hyperbench-workspace-0.1.1.tgz
 ```
 
-`npm pack` produces the same installable package used for GitHub releases, with compiled UI/server and the skills. It excludes local data, test output, and dependencies (installed by npm). See [architecture](docs/architecture.md) and [validation](docs/validation.md).
+`npm pack` produces the same installable package used for GitHub releases, with compiled UI/server and the skills. It excludes local data, tests, and dependencies (installed by npm). The package verifier installs into a temporary directory and checks startup, skill installation, browser APIs, and MCP. It requires registry access and removes the temporary installation afterward.
+
+For the live SSH integration test, prepare a disposable target and a JSON file outside the repo containing `host`, `port`, `username`, `identityFile`, and `knownHostsFile`. Use absolute paths to the key and verified trust file. The target needs a POSIX shell with `printf`, `uname`, `hostname`, `pwd`, `sleep`, and `yes`.
+
+```sh
+HYPERBENCH_SSH_TEST_CONFIG=/absolute/path/connection.json npm test
+```
+
+The live test is skipped when this variable is absent. CI runs backend/build checks on Linux, macOS, and Windows with Node 22/24, plus Chromium on Linux.
 
 ## Troubleshooting
 
