@@ -1797,6 +1797,119 @@ button svg {
 .modal.wide {
   width: 720px;
 }
+.document-heading-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.equipment-skills {
+  line-height: 1.55;
+}
+.equipment-skills-toolbar,
+.equipment-skill-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.equipment-skill-heading {
+  margin-top: 20px;
+}
+.equipment-skill-heading h3,
+.equipment-skills p {
+  overflow-wrap: anywhere;
+}
+.equipment-skill-request {
+  border-block: 1px solid var(--border-strong);
+  margin: 18px 0;
+  padding-bottom: 20px;
+}
+.equipment-skill-request > p {
+  margin: 16px 0 12px;
+}
+.equipment-skill-request > .error-banner {
+  margin-top: 16px;
+}
+.equipment-document-picker {
+  min-width: 0;
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  margin: 0;
+  padding: 10px 12px;
+}
+.equipment-document-picker label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 0;
+  overflow-wrap: anywhere;
+}
+.equipment-document-picker input {
+  width: 16px;
+  height: 16px;
+  margin: 3px 0 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+.equipment-skill-list,
+.equipment-skill-sources ul {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 0;
+}
+.equipment-skill-list > li + li {
+  border-top: 1px solid var(--border-strong);
+}
+.equipment-skill-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 8px;
+  text-align: left;
+  background: transparent;
+}
+.equipment-skill-list button:hover {
+  background: var(--surface);
+}
+.equipment-skill-list button > span:first-child,
+.equipment-skill-sources li {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+  overflow-wrap: anywhere;
+}
+.equipment-skill-body {
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 340px;
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 16px;
+  margin: 18px 0;
+}
+.equipment-skill-sources summary {
+  cursor: pointer;
+}
+.equipment-skill-sources li + li {
+  margin-top: 14px;
+}
+.equipment-skill-sources code {
+  font-size: inherit;
+  color: var(--text-secondary);
+}
+.equipment-skill-review-note {
+  margin-top: 12px;
+  color: var(--text-secondary);
+}
 .modal-heading {
   display: flex;
   align-items: center;

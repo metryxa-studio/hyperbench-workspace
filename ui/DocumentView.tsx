@@ -8,6 +8,7 @@ import type {
   SystemModel,
 } from "../src/types";
 import { authHeaders, bytes, call, message, newId } from "./api";
+import { EquipmentSkillsModal } from "./EquipmentSkillsModal";
 import {
   Badge,
   Button,
@@ -72,6 +73,10 @@ export function DocumentView({
   const inputRef = useRef<HTMLInputElement>(null);
   const searchRequestId = useRef(0);
   const [showDocuments, setShowDocuments] = useState(false);
+  const [equipmentSkillsProject, setEquipmentSkillsProject] = useState<
+    string | null
+  >(null);
+  useEffect(() => setEquipmentSkillsProject(null), [project.id]);
   const documentIds = documents.map((doc) => doc.id).join(",");
   useEffect(() => {
     searchRequestId.current++;
@@ -387,17 +392,25 @@ export function DocumentView({
         <div>
           <h1>Documents</h1>
         </div>
-        <Button
-          variant="primary"
-          icon="upload"
-          onClick={() => {
-            setModal("import");
-            setModalError("");
-          }}
-          disabled={uploading}
-        >
-          {uploading ? "Importing…" : "Import documents"}
-        </Button>
+        <div className="heading-actions document-heading-actions">
+          <Button
+            icon="draft"
+            onClick={() => setEquipmentSkillsProject(project.id)}
+          >
+            Equipment skills
+          </Button>
+          <Button
+            variant="primary"
+            icon="upload"
+            onClick={() => {
+              setModal("import");
+              setModalError("");
+            }}
+            disabled={uploading}
+          >
+            {uploading ? "Importing…" : "Import documents"}
+          </Button>
+        </div>
       </div>
       {error && <ErrorBanner onClose={() => setError("")}>{error}</ErrorBanner>}
       {!documents.length ? (
@@ -813,6 +826,14 @@ export function DocumentView({
           <h2>Drop documents to import</h2>
           <p>PDF and text files · up to 32 MiB each</p>
         </div>
+      )}
+      {equipmentSkillsProject === project.id && (
+        <EquipmentSkillsModal
+          project={project}
+          documents={documents}
+          selectedDocumentId={selected?.id}
+          onClose={() => setEquipmentSkillsProject(null)}
+        />
       )}
       {modal === "import" && (
         <Modal

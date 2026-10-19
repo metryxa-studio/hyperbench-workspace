@@ -30,6 +30,10 @@ Use absolute paths. The UI supplies them, including paths with spaces. If the cl
 
 Install the three folders under `skills/` into a skill directory your client supports, or load one `SKILL.md` as instructions. Use the host's own tools and approvals to run local tests or fuzzers, or use an explicitly enabled SSH bench for remote commands. The skills do not install compilers, send PR comments, or authorize bench operations.
 
+For equipment-specific guidance, use **Documents → Equipment skills** to choose documents and copy an authoring request into your agent. The agent reads those documents with existing retrieval tools and calls `propose_equipment_skill`. `equipment_skills` lists the project's drafts and accepted guides. The browser user reviews, accepts, and downloads the generated `SKILL.md`; there is no MCP acceptance or installation tool. Store the download inside its own skill folder in your client's supported location. A later revision is a separate draft and does not overwrite an installed copy.
+
+Each proposal records its source pages and imported document hashes. Citations identify evidence but do not prove that the generated instructions are correct. Review the equipment revision, diagnostic steps, and untested assumptions before use. Deleting a referenced document requires deleting the associated skill records first.
+
 ## SSH benches
 
 Register and test a bench in the browser's **Test benches** view. Commands start disabled and must be enabled there. The agent cannot create a bench, edit its connection settings, or enable commands using MCP. Its connection uses the local process's OpenSSH executable, SSH configuration, keys/agent, and trusted host keys. Fix authentication and trust issues using your usual SSH tooling; Hyperbench does not prompt for passwords or accept new host keys automatically.

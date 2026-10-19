@@ -5,7 +5,7 @@ import path from "node:path";
 import { Workspace } from "../src/core/workspace";
 import { startBrowserServer } from "../src/server";
 import { pdfFixture } from "./pdf-fixture";
-import type { SystemModel, TestBench } from "../src/types";
+import type { DocumentSummary, EquipmentSkill, SystemModel, TestBench } from "../src/types";
 let directory: string,
   workspace: Workspace,
   local: Awaited<ReturnType<typeof startBrowserServer>>;
@@ -2138,4 +2138,144 @@ test("a remote command result stays with its project when switching projects", a
   } finally {
     release();
   }
+});
+
+test("equipment skills preserve failed reviews, expose provenance and export only after acceptance", async ({ page }) => {
+  await createProject(page);
+  await page.getByRole("button", { name: /^Documents/ }).click();
+  await page.getByRole("button", { name: "Equipment skills", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Equipment skills", exact: true });
+  await expect(dialog.getByRole("button", { name: "New skill", exact: true })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Close dialog", exact: true }).click();
+  await page.getByLabel("Upload documents").setInputFiles({
+    name: "device.md",
+    mimeType: "text/markdown",
+    buffer: await readFile(path.resolve("examples/equipment-skill/device.md")),
+  });
+  await expect(page.locator(".document-sidebar")).toContainText("device.md");
+  const document = (await workspace.call("documents.list", { projectId }) as DocumentSummary[])[0];
+  await page.getByRole("button", { name: "Equipment skills", exact: true }).click();
+  await dialog.getByRole("button", { name: "New skill", exact: true }).click();
+  await expect(dialog.getByRole("checkbox", { name: "device.md" })).toBeChecked();
+  await dialog.getByLabel("Equipment and revision").fill("Harbor H2 revision D");
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async () => { throw new Error("Clipboard denied"); } },
+    });
+  });
+  await dialog.getByRole("button", { name: "Copy request for agent", exact: true }).click();
+  const request = dialog.getByLabel("Request for your agent");
+  await expect(request).toBeVisible();
+  expect(await request.inputValue()).toContain(projectId);
+  expect(await request.inputValue()).toContain(document.id);
+  expect(await request.inputValue()).toContain(document.sha256);
+  expect(await request.inputValue()).toContain("propose_equipment_skill");
+  await dialog.getByLabel("Equipment and revision").fill("Harbor H2 revision D, capture 2");
+  await expect(request).toHaveCount(0);
+  const body = "# Harbor H2\n\nUse the revision D status mask (device.md, page 1).\n\n<script>window.skillExecuted = true</script>\n\nUntested on hardware.";
+  const skill = await workspace.call("equipmentSkills.propose", {
+    projectId,
+    name: "harbor-h2-debugging",
+    equipment: "Harbor H2 revision D",
+    description: "Investigate unusable samples with the revision-matched status decoder.",
+    body,
+    sources: [{ documentId: document.id, pageStart: 1, pageEnd: 1 }],
+  }) as EquipmentSkill;
+  await dialog.getByRole("button", { name: /harbor-h2-debugging/ }).click();
+  await expect(dialog.getByLabel("Skill Markdown")).toContainText("<script>");
+  expect(await page.evaluate(() => (window as any).skillExecuted)).toBeUndefined();
+  await expect(dialog.getByRole("button", { name: "Download SKILL.md" })).toHaveCount(0);
+  await dialog.getByText("Sources · 1", { exact: true }).click();
+  await expect(dialog).toContainText(document.sha256);
+  let failAcceptance = true;
+  await page.route("**/api/call", async (route) => {
+    if (route.request().postDataJSON()?.method === "equipmentSkills.accept" && failAcceptance) {
+      failAcceptance = false;
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Review could not be saved. Retry." }) });
+    } else await route.continue();
+  });
+  await dialog.getByRole("button", { name: "Accept skill", exact: true }).click();
+  await expect(dialog).toContainText("Review could not be saved. Retry.");
+  await expect(dialog.getByRole("button", { name: "Accept skill", exact: true })).toBeEnabled();
+  await expect(dialog.getByLabel("Skill Markdown")).toContainText(body);
+  expect((await workspace.call("equipmentSkills.list", { projectId }) as EquipmentSkill[])[0].status).toBe("draft");
+  await dialog.getByRole("button", { name: "Accept skill", exact: true }).click();
+  await expect(dialog.getByText("Accepted", { exact: true })).toBeVisible();
+  const downloadEvent = page.waitForEvent("download");
+  await dialog.getByRole("button", { name: "Download SKILL.md", exact: true }).click();
+  const download = await downloadEvent;
+  expect(download.suggestedFilename()).toBe("SKILL.md");
+  const exported = await readFile((await download.path())!, "utf8");
+  expect(exported).toContain(body);
+  expect(exported).toContain(document.sha256);
+  expect(exported).toContain('name: "harbor-h2-debugging"');
+  await page.reload();
+  await page.getByRole("button", { name: /^Documents/ }).click();
+  await page.getByRole("button", { name: "Equipment skills", exact: true }).click();
+  await dialog.getByRole("button", { name: /harbor-h2-debugging/ }).click();
+  await expect(dialog.getByText("Accepted", { exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  page.once("dialog", confirmation => confirmation.accept());
+  await dialog.getByRole("button", { name: "Remove skill", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: /harbor-h2-debugging/ })).toHaveCount(0);
+  expect(await workspace.call("equipmentSkills.list", { projectId })).toEqual([]);
+  expect(skill.sources[0].sha256).toBe(document.sha256);
+});
+
+test("equipment skill requests enforce 20-skill and 24-source limits", async ({ page }) => {
+  await createProject(page);
+  const documents: DocumentSummary[] = [];
+  for (let index = 0; index < 25; index++) {
+    documents.push(await workspace.call("documents.upload", {
+      projectId,
+      name: `source-${String(index).padStart(2, "0")}.txt`,
+      base64: Buffer.from(`Equipment source ${index}`).toString("base64"),
+    }) as DocumentSummary);
+  }
+  const proposal = {
+    projectId,
+    description: "Check the equipment against its source.",
+    equipment: "Sensor board revision C",
+    body: "Compare the selected configuration with the document.",
+    sources: [{ documentId: documents[0].id, pageStart: 1, pageEnd: 1 }],
+  };
+  for (let index = 0; index < 19; index++) {
+    await workspace.call("equipmentSkills.propose", {
+      ...proposal,
+      name: `sensor-${index}`,
+    });
+  }
+  await page.reload();
+  await page.getByRole("button", { name: /^Documents/ }).click();
+  await page.getByRole("button", { name: "Equipment skills", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Equipment skills", exact: true });
+  await dialog.getByRole("button", { name: "New skill", exact: true }).click();
+  await dialog.getByLabel("Equipment and revision").fill("Sensor board revision C");
+  for (const document of documents.slice(0, 24)) {
+    await dialog.getByRole("checkbox", { name: document.name, exact: true }).check();
+  }
+  const firstSource = dialog.getByRole("checkbox", { name: documents[0].name, exact: true });
+  const lastSource = dialog.getByRole("checkbox", { name: documents[24].name, exact: true });
+  await expect(lastSource).toBeDisabled();
+  await expect(dialog.getByRole("checkbox", { checked: true })).toHaveCount(24);
+  await firstSource.uncheck();
+  await expect(lastSource).toBeEnabled();
+  await lastSource.check();
+  await expect(firstSource).toBeDisabled();
+  await expect(dialog.getByRole("checkbox", { checked: true })).toHaveCount(24);
+  const copy = dialog.getByRole("button", { name: "Copy request for agent", exact: true });
+  await expect(copy).toBeEnabled();
+
+  await workspace.call("equipmentSkills.propose", { ...proposal, name: "sensor-last" });
+  await expect(dialog).toContainText("Limit of 20 skills reached.");
+  await expect(copy).toBeDisabled();
+  await dialog.getByRole("button", { name: "Close request", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "New skill", exact: true })).toBeDisabled();
+  await dialog.getByRole("button", { name: /^sensor-0\b/ }).click();
+  page.once("dialog", confirmation => confirmation.accept());
+  await dialog.getByRole("button", { name: "Discard draft", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "New skill", exact: true })).toBeEnabled();
+  expect((await workspace.call("equipmentSkills.list", { projectId }) as EquipmentSkill[])).toHaveLength(19);
 });

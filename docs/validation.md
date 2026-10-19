@@ -1,12 +1,12 @@
 # Validation
 
-Application checks below were run on 18 October 2026. Skill checks were added on 19 October. These results cover the tested paths, not a guarantee that every client or hardware target works.
+Application and equipment-skill checks below were run on 19 October 2026. These results cover the tested paths, not a guarantee that every client or hardware target works.
 
 | Check | Result |
 | --- | --- |
 | TypeScript and production build | Pass. |
-| Backend, HTTP, and MCP | 58 pass; the optional live-SSH test is skipped without a disposable target. |
-| Chromium workflows | 31 pass, including narrow layouts, delayed responses, partial failures, persistence, and reconnecting. |
+| Backend, HTTP, and MCP | 66 pass; the optional live-SSH test is skipped without a disposable target. |
+| Chromium workflows | 33 pass, including narrow layouts, delayed responses, partial failures, persistence, and reconnecting. |
 | Fresh package install | Startup, paths with spaces, skills, browser APIs, MCP, and explicit draft acceptance pass on Node 26. |
 | Runtime dependency audit | No known vulnerabilities reported at check time. |
 
@@ -41,7 +41,7 @@ This checks a connection probe, remote output and exit status, timeout/output li
 
 ## Skill checks
 
-The three expanded skills passed frontmatter validation and a review against the implemented MCP tools. A fresh package install copied all nine skill Markdown files, including nested references, byte-for-byte into a destination with spaces. A repeated installation refused to overwrite them.
+All three skills passed frontmatter validation and a review against the implemented MCP tools. The package includes all eleven skill Markdown files and the four-file equipment example. A fresh installation into a path containing spaces passed; repeating skill installation refused to overwrite existing files.
 
 An agent that did not author the skills investigated three synthetic fixtures without being given the expected answers:
 
@@ -53,9 +53,17 @@ An agent that did not author the skills investigated three synthetic fixtures wi
 
 The evaluation found an ambiguous assumption that MCP was always available; the retrieval skill now explicitly supports supplied local artifacts. Temporary fixtures, binaries, and reports were kept outside the repository. These checks establish behavior on these examples, not a measured improvement over the old skills or performance across hardware targets. The historical public bugs discussed in the references were source-checked, not rerun in this skill update.
 
+## Equipment skills
+
+The browser checks cover source selection, clipboard denial, draft polling, failed acceptance and retry, accepted-only export, persistence, removal, and the 20-skill/24-source limits. Backend and MCP checks cover project isolation, canonical document hashes, page bounds, immutable review, concurrent access, and referenced-document deletion. An actual stdio session read the example document and submitted a draft that was reviewed in the browser.
+
+An independent agent received the fictional device specification, faulty decoder, checks, and debugging guidance without the expected diagnosis. In a temporary copy it reproduced the three failures, repaired revision selection, and passed all twelve checks. An exhaustive comparison covered all 512 byte/revision combinations and preserved all 256 revision B outputs. The repository example intentionally retains the fault so others can reproduce the workflow.
+
+This establishes behavior on one synthetic host example. It is not a skill-versus-no-skill comparison, a physical hardware test, or a measured performance improvement. The new references, application changes, and example are independently authored; no IoT-SkillsBench tasks, code, or skill text are bundled.
+
 ## Release and scope
 
-The npm registry remains at 0.1.0. Current source changes are not published there; the existing 0.1.1 GitHub archive also predates these fixes. Build from the current source to use them.
+The equipment-skill changes require a source build. They are not included in the existing npm 0.1.0 release or the earlier 0.1.1 GitHub archive.
 
 All skill prose and worked examples were written for this tool. A scoped comparison of the nine skill files against 55 pinned reference files from workersio, Caveman, and hardware-agency-agents found no shared normalized sequence of six or more words. Two five-word matches were reviewed as ordinary connective language. This is a phrase-overlap check, not a universal originality guarantee or a semantic-plagiarism test. Required license notices remain intact.
 
