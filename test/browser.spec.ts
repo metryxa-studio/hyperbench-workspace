@@ -1514,8 +1514,11 @@ test("a fresh launch link reconnects an already-open expired session", async ({
 }) => {
   await page.goto(`${local.url.split("#")[0]}?reconnect#token=expired`);
   await expect(page.getByRole("alert")).toContainText(
-    "Workspace access expired.",
+    "printed by hyperbench start",
   );
+  await expect(
+    page.getByRole("button", { name: "Create project", exact: true }),
+  ).toBeDisabled();
   await page.goto(local.url.replace("/#", "/?reconnect#"));
   await expect(
     page.getByRole("button", { name: "Create project", exact: true }),
