@@ -123,19 +123,6 @@ The MCP server uses **stdio**, with the same local data directory as the browser
 
 Your agent retains its own model, API keys, script execution, and permission controls. Hyperbench has no provider routing or agent harness.
 
-## Data and limits
-
-Data defaults to `~/.hyperbench/workspace`: SQLite project state plus imported document copies. Use `--data-dir PATH` on both the browser and MCP commands to select another location. Original repository files remain in their chosen folders. Unlinking or deleting a project never deletes those folders.
-
-The browser binds to `127.0.0.1`. Its API requires the token in the launch link and rejects foreign origins. The package has no telemetry or hosted processing. Installation downloads dependencies; cloning contacts the Git remote you choose; bench operations contact the SSH hosts you register. Your agent may send selected tool results to its configured cloud model. This tool does not change the agent's privacy settings.
-
-- No code index, embeddings, automatic dependency graph, or bundled model is included. Source search reads local files on demand and reports bounded results.
-- PDF text extraction and page rendering are local. Scanned drawings can be inspected as images by a vision-capable agent. Automatic OCR and electrical-net reconstruction are not included.
-- System relationships are user-created or agent-proposed. Evidence links are references, not proof that an inferred connection is correct.
-- Imported document copies do not automatically follow later edits to their original files. Reimport the updated document when needed.
-- Repository files are read from the working tree, not immutable snapshots. Git HEAD metadata alone does not certify uncommitted content.
-- Tests and fuzzers can run through the host agent's own tools or on an enabled SSH test bench. Hyperbench has no device-specific flashing, instrument, or power-control integration; commands can use tools already installed on the remote bench.
-
 ## Build from source
 
 ```sh
@@ -171,4 +158,4 @@ Run `hyperbench doctor`. If a browser tab loses its connection after a restart, 
 
 ## License
 
-[MIT](LICENSE). Third-party notices are in [NOTICE](NOTICE). The Hyperbench code indexer is not part of this repository or package.
+[MIT](LICENSE). Third-party notices are in [NOTICE](NOTICE). 
