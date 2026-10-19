@@ -27,4 +27,4 @@ There is no Code-OSS shell, provider harness, embedding store, cloud account, we
 
 This repository began with fresh Git history. Only the context workspace and its own assets belong here. Do not copy private application histories, customer repositories, extracted documents, model credentials, local SQLite files, or the separate code indexer into it.
 
-Skill organization was informed by the repositories named in the product request: workersio/skills, Seahan1/hardware-agency-agents, 0sec-labs/0, and greptileai/skills. No prose or skill implementation was copied from them.
+Skill organization was informed by the repositories named in the product request: workersio/skills, Seahan1/hardware-agency-agents, 0sec-labs/0, greptileai/skills, and JuliusBrussee/caveman. No prose or skill implementation was copied from them. The skills keep their main workflow in SKILL.md and load relevant references on demand. Historical bug examples link to public upstream evidence; invented examples are labeled separately.

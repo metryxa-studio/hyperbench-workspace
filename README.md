@@ -80,13 +80,15 @@ All skill prose is original and provider-independent. They run inside your chose
 | [hardware-debugging](skills/hardware-debugging/SKILL.md) | Reproduce a symptom, distinguish causes, and validate a scoped fix. |
 | [hardware-pr-review](skills/hardware-pr-review/SKILL.md) | Trace a local PR diff and select focused regression, property, or fuzz checks. |
 
+Each skill includes focused references and a worked example. Agents read the relevant detail as needed: tracing pins and code, distinguishing failure mechanisms, or designing checks that can reproduce a regression.
+
 Copy skills into a directory supported by your agent, for example a project's `.agents/skills` directory:
 
 ```sh
 hyperbench skills --destination /path/to/project/.agents/skills
 ```
 
-Existing skill folders are never overwritten. For clients that do not discover `SKILL.md`, load the chosen file as instructions. A skill can also be downloaded directly from this repository; its host still needs the MCP connection for Hyperbench tools.
+Existing skill folders are never overwritten or updated automatically. For clients that do not discover `SKILL.md`, load the chosen file as instructions. To download a skill directly from this repository, keep its entire folder, including `references/`. The skills can guide local-file investigation; using Hyperbench tools requires an MCP connection.
 
 PR review is invoked by the user or their existing agent workflow. This package does not watch GitHub, fetch private PRs automatically, or send review comments.
 

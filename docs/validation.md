@@ -1,6 +1,6 @@
 # Validation
 
-Checks run on 18 October 2026 for the current source tree. These results cover the tested paths, not a guarantee that every client or hardware target works.
+Application checks below were run on 18 October 2026. Skill checks were added on 19 October. These results cover the tested paths, not a guarantee that every client or hardware target works.
 
 | Check | Result |
 | --- | --- |
@@ -39,10 +39,24 @@ HYPERBENCH_SSH_TEST_CONFIG=/absolute/path/connection.json npm test
 
 This checks a connection probe, remote output and exit status, timeout/output limits, and host-key rejection through a real MCP client. It does not establish hardware health or guarantee remote processes stop after an SSH timeout.
 
+## Skill checks
+
+The three expanded skills passed frontmatter validation and a review against the implemented MCP tools. A fresh package install copied all nine skill Markdown files, including nested references, byte-for-byte into a destination with spaces. A repeated installation refused to overwrite them.
+
+An agent that did not author the skills investigated three synthetic fixtures without being given the expected answers:
+
+| Fixture | Observed result |
+| --- | --- |
+| Conflicting board revisions and a missing schematic image | Traced the selected software route and left the connector pin unresolved; did not treat an old saved diagram as proof. |
+| Commands rejected after a controller session changed | Replayed the capture, identified retained sequence state, and tested a state intervention while preserving duplicate-rejection controls. No physical motion was claimed. |
+| Packet-decoder PR | Ran the same 7,476 generated cases on each revision with native sanitizers. Base passed; head exposed one trailing-byte acceptance regression through 3,121 failing input variants. |
+
+The evaluation found an ambiguous assumption that MCP was always available; the retrieval skill now explicitly supports supplied local artifacts. Temporary fixtures, binaries, and reports were kept outside the repository. These checks establish behavior on these examples, not a measured improvement over the old skills or performance across hardware targets. The historical public bugs discussed in the references were source-checked, not rerun in this skill update.
+
 ## Release and scope
 
 The npm registry remains at 0.1.0. Current source changes are not published there; the existing 0.1.1 GitHub archive also predates these fixes. Build from the current source to use them.
 
-All three skills were written for this tool. An independent comparison with 11 selected reference documents found no shared normalized sequence of five or more words. That is a scoped review, not a claim of uniqueness against every published document. Required license notices remain intact.
+All skill prose and worked examples were written for this tool. A scoped comparison of the nine skill files against 55 pinned reference files from workersio, Caveman, and hardware-agency-agents found no shared normalized sequence of six or more words. Two five-word matches were reviewed as ordinary connective language. This is a phrase-overlap check, not a universal originality guarantee or a semantic-plagiarism test. Required license notices remain intact.
 
 Automatic OCR, code indexing, and model execution are outside this package. Agents retain their own model, permissions, and approval policies. A passing stdio MCP check does not establish compatibility with every desktop agent client.
