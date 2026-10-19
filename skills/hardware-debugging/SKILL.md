@@ -1,6 +1,6 @@
 ---
 name: hardware-debugging
-description: Diagnose firmware and hardware-interface failures using local code, logs, specifications, and Hyperbench context. Use for incorrect readings, missing messages, timing faults, initialization failures, and regressions.
+description: Diagnose firmware and hardware-interface failures using local code, logs, specifications, and Hyperbench context. Use for incorrect readings, missing messages, timing faults, initialization failures, regressions, or drafting equipment-specific debugging guidance from imported documents.
 ---
 
 # Hardware debugging
@@ -15,6 +15,8 @@ Read supporting material only when it helps the current investigation:
 | --- | --- |
 | Several explanations fit; timing, geometry, or an evaluator may be involved | [Mechanism-based triage](references/mechanism-triage.md) |
 | Choosing a reproduction, controls, or evidence sufficient to justify a fix | [Experiments and a worked example](references/experiments.md) |
+| Turning equipment documents and observed failures into a reusable skill | [Equipment skill authoring](references/equipment-skills.md) |
+| A Zephyr build or PX4 sensor path needs configuration and runtime evidence | [Platform evidence recipes](references/platform-evidence.md) |
 
 ## Establish what failed
 

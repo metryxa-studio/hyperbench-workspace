@@ -110,7 +110,7 @@ test("MCP exposes draft proposals and bench execution without saved-state manage
     const tools = await x.client.listTools();
     assert.equal(
       tools.tools.filter((t) => t.annotations?.readOnlyHint === false).length,
-      2,
+      3,
     );
     assert.equal(
       tools.tools.some((t) =>
@@ -131,6 +131,77 @@ test("MCP exposes draft proposals and bench execution without saved-state manage
   } finally {
     await x.close();
   }
+});
+test("equipment skills travel through scoped MCP as drafts and require browser acceptance", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "hb-mcp-equipment-"));
+  const workspace = new Workspace(directory);
+  const project = (await workspace.call("projects.create", { name: "Equipment" })) as Project;
+  const other = (await workspace.call("projects.create", { name: "Other" })) as Project;
+  const document = await workspace.call("documents.upload", {
+    projectId: project.id,
+    name: "sample-controller.txt",
+    base64: Buffer.from("Sample controller revision D: fault status remains latched until a reset.").toString("base64"),
+  }) as { id: string; sha256: string };
+  const server = createMcpServer(workspace, project.id);
+  const client = new Client({ name: "equipment-test-agent", version: "1.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  t.after(async () => {
+    await client.close();
+    await server.close();
+    workspace.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const tools = (await client.listTools()).tools;
+  assert.deepEqual(tools.filter(tool => tool.name.includes("equipment")).map(tool => tool.name).sort(), ["equipment_skills", "propose_equipment_skill"]);
+  assert.equal(tools.find(tool => tool.name === "equipment_skills")?.annotations?.readOnlyHint, true);
+  assert.equal(tools.find(tool => tool.name === "propose_equipment_skill")?.annotations?.readOnlyHint, false);
+  const proposal = {
+    projectId: project.id,
+    name: "sample-controller-debugging",
+    description: "Investigate retained fault status on the sample controller.",
+    equipment: "Sample controller revision D",
+    body: "# Check retained status\n\nRead fault status before proposing any reset. The document describes retained state (sample-controller.txt, page 1). This check has not been run.",
+    sources: [{ documentId: document.id, pageStart: 1, pageEnd: 1 }],
+  };
+  for (const name of ["equipment_skills", "propose_equipment_skill"]) {
+    const rejected = await client.callTool({ name, arguments: { ...proposal, projectId: other.id } });
+    assert.equal(rejected.isError, true);
+  }
+  const proposed = await client.callTool({ name: "propose_equipment_skill", arguments: proposal });
+  assert.notEqual(proposed.isError, true);
+  const skill = JSON.parse((proposed.content as { text: string }[])[0]!.text);
+  assert.equal(skill.status, "draft");
+  assert.equal(skill.sources[0].sha256, document.sha256);
+  await assert.rejects(workspace.call("equipmentSkills.export", { projectId: project.id, skillId: skill.id }), /accept|review/i);
+  await workspace.call("equipmentSkills.accept", { projectId: project.id, skillId: skill.id });
+  const listed = await client.callTool({ name: "equipment_skills", arguments: { projectId: project.id } });
+  const records = JSON.parse((listed.content as { text: string }[])[0]!.text);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].status, "accepted");
+  assert.equal(records[0].body, undefined);
+  const fetched = await client.callTool({
+    name: "equipment_skills", arguments: { projectId: project.id, skillId: skill.id },
+  });
+  const fullRecords = JSON.parse((fetched.content as { text: string }[])[0]!.text);
+  assert.equal(fullRecords.length, 1);
+  assert.equal(fullRecords[0].body, proposal.body);
+  const outsideScope = await client.callTool({
+    name: "equipment_skills", arguments: { projectId: other.id, skillId: skill.id },
+  });
+  assert.equal(outsideScope.isError, true);
+  const otherDocument = await workspace.call("documents.upload", {
+    projectId: other.id, name: "other.txt", base64: Buffer.from("Other equipment").toString("base64"),
+  }) as { id: string };
+  const otherSkill = await workspace.call("equipmentSkills.propose", {
+    ...proposal, projectId: other.id,
+    sources: [{ documentId: otherDocument.id, pageStart: 1, pageEnd: 1 }],
+  }) as { id: string };
+  const wrongOwner = await client.callTool({
+    name: "equipment_skills", arguments: { projectId: project.id, skillId: otherSkill.id },
+  });
+  assert.equal(wrongOwner.isError, true);
 });
 test("MCP bench execution advertises remote side effects and fixed probes advertise remote access", async () => {
   const x = await connected("a");

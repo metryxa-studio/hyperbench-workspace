@@ -27,6 +27,12 @@ Methods (all IDs are strings, required unless marked optional):
 - documents.search {projectId,query,limit?} -> {hits:Array<{documentId,name,page,text}>,truncated:boolean}
 - documents.page {projectId,documentId,page,scale?,crop?:{x:number,y:number,width:number,height:number}} -> {data:string,mimeType:'image/png',page:number,width:number,height:number}; crop normalized 0..1
 - documents.delete {projectId,documentId} -> {ok:true}
+- equipmentSkills.list {projectId} -> EquipmentSkill[]
+- equipmentSkills.catalog {projectId,skillId?} -> equipment metadata without bodies, or one full record when skillId is supplied; MCP only, not exposed over HTTP
+- equipmentSkills.propose {projectId,name,description,equipment,body,sources:Array<{documentId,pageStart,pageEnd}>} -> EquipmentSkill; immutable draft with document names and hashes captured by the server
+- equipmentSkills.accept {projectId,skillId} -> EquipmentSkill; browser only, review acceptance does not establish test validation
+- equipmentSkills.delete {projectId,skillId} -> {ok:true}; browser only
+- equipmentSkills.export {projectId,skillId} -> {filename:'SKILL.md',content:string}; browser only, accepted skills only, no filesystem installation
 - system.get {projectId} -> SystemModel
 - system.save {projectId,system,expectedRevision} -> SystemModel; explicit UI action only, compare-and-swap
 - drafts.list {projectId} -> SystemDraft[]

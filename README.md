@@ -92,6 +92,16 @@ Existing skill folders are never overwritten or updated automatically. For clien
 
 PR review is invoked by the user or their existing agent workflow. This package does not watch GitHub, fetch private PRs automatically, or send review comments.
 
+### Equipment skills from documents
+
+In **Documents → Equipment skills**, select the equipment's datasheets or manuals, enter its model/revision, and copy the request into your connected agent. The agent reads the selected pages and proposes an equipment-specific debugging skill. Review the draft in the browser, accept it, then download `SKILL.md`. Put that file inside a named skill folder supported by your agent; Hyperbench does not install it automatically.
+
+Drafts retain the imported document names, page ranges, and hashes. A useful skill connects a symptom to evidence, a diagnostic check, and an expected observation. Document-derived instructions remain untested until supported by actual test results. Accepting a draft does not certify the equipment. Generation uses your agent and its model/privacy settings; Hyperbench stores drafts locally and makes no model calls.
+
+The debugging skill also includes [version-specific platform guidance](skills/hardware-debugging/references/platform-evidence.md) and an [equipment authoring workflow](skills/hardware-debugging/references/equipment-skills.md). [IoT-SkillsBench](https://arxiv.org/abs/2603.19583) informed the emphasis on concrete platform evidence and observable checks. Its expert authors had access to failure observations that its generated-skill authors did not; its results are not a performance claim for Hyperbench. No benchmark code, skill text, or task data is included.
+
+Try the [equipment debugging example](examples/equipment-skill/README.md) with a fictional device specification and runnable host checks. It needs no hardware or additional packages.
+
 ## Agent connection
 
 Use the UI's project-specific configuration, or print one:
@@ -113,6 +123,7 @@ The MCP server uses **stdio**, with the same local data directory as the browser
 | `document_search`, `document_read`, `document_page` | Extracted text and rendered PDF pages/crops |
 | `system_get`, `system_drafts` | Saved architecture and pending proposals |
 | `propose_system` | Create a draft; cannot accept it or overwrite the saved model |
+| `equipment_skills`, `propose_equipment_skill` | Read equipment skills and propose document-grounded drafts; acceptance and download stay in the browser |
 | `list_benches`, `bench_test` | List registered benches and run a fixed SSH connection probe |
 | `bench_execute` | Run a remote shell command on an explicitly enabled bench; can change remote files and hardware state |
 

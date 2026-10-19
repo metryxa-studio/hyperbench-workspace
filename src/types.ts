@@ -59,6 +59,25 @@ export interface DocumentContent {
   document: DocumentSummary;
   pages: DocumentPage[];
 }
+export interface EquipmentSkillSource {
+  documentId: string;
+  name: string;
+  sha256: string;
+  pageStart: number;
+  pageEnd: number;
+}
+export interface EquipmentSkill {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string;
+  equipment: string;
+  body: string;
+  status: "draft" | "accepted";
+  sources: EquipmentSkillSource[];
+  createdAt: string;
+  acceptedAt?: string;
+}
 export type Evidence =
   | {
       type: "source";

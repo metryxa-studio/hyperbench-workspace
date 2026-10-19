@@ -21,6 +21,8 @@ import type {
   Connection,
   DocumentLink,
   DocumentSummary,
+  EquipmentSkill,
+  EquipmentSkillSource,
   Evidence,
   Project,
   Repository,
@@ -39,6 +41,7 @@ import {
   validateSourceReference,
 } from "./repositories.ts";
 import { processDocument, renderDocumentPage } from "./documents.ts";
+import { exportEquipmentSkill } from "./equipment-skills.ts";
 import {
   BENCH_TEST_COMMAND,
   benchRevision,
@@ -152,10 +155,12 @@ export class Workspace {
       CREATE TABLE IF NOT EXISTS document_pages(documentId TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,page INTEGER NOT NULL,text TEXT NOT NULL,PRIMARY KEY(documentId,page));
       CREATE TABLE IF NOT EXISTS systems(projectId TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,revision INTEGER NOT NULL,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY,projectId TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,baseRevision INTEGER NOT NULL,summary TEXT NOT NULL,body TEXT NOT NULL,createdAt TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS equipment_skills(id TEXT PRIMARY KEY,projectId TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,name TEXT NOT NULL,description TEXT NOT NULL,equipment TEXT NOT NULL,body TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('draft','accepted')),sources TEXT NOT NULL,createdAt TEXT NOT NULL,acceptedAt TEXT);
       CREATE TABLE IF NOT EXISTS benches(id TEXT PRIMARY KEY,projectId TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,name TEXT NOT NULL,description TEXT NOT NULL,host TEXT NOT NULL,port INTEGER NOT NULL,username TEXT,identityFile TEXT,knownHostsFile TEXT,enabled INTEGER NOT NULL,revision INTEGER NOT NULL,createdAt TEXT NOT NULL,updatedAt TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS repositories_project ON repositories(projectId);
       CREATE INDEX IF NOT EXISTS documents_project ON documents(projectId);
       CREATE INDEX IF NOT EXISTS benches_project ON benches(projectId);
+      CREATE INDEX IF NOT EXISTS equipment_skills_project ON equipment_skills(projectId);
       CREATE INDEX IF NOT EXISTS drafts_project ON drafts(projectId);`);
   }
 
@@ -255,6 +260,35 @@ export class Workspace {
       system: JSON.parse(row.body),
       createdAt: row.createdAt,
     };
+  }
+  private equipmentSkillFromRow(row: Row): EquipmentSkill {
+    return {
+      id: row.id,
+      projectId: row.projectId,
+      name: row.name,
+      description: row.description,
+      equipment: row.equipment,
+      body: row.body,
+      status: row.status,
+      sources: JSON.parse(row.sources),
+      createdAt: row.createdAt,
+      ...(row.acceptedAt ? { acceptedAt: row.acceptedAt } : {}),
+    };
+  }
+  private equipmentSkill(projectId: string, value: unknown): EquipmentSkill {
+    const row = this.get(
+      "SELECT * FROM equipment_skills WHERE id=? AND projectId=?",
+      id(value, "Equipment skill ID"),
+      projectId,
+    );
+    if (!row) throw new Error("Equipment skill does not exist in this project.");
+    return this.equipmentSkillFromRow(row);
+  }
+  private equipmentSkills(projectId: string): EquipmentSkill[] {
+    return this.all(
+      "SELECT * FROM equipment_skills WHERE projectId=? ORDER BY createdAt,id",
+      projectId,
+    ).map((row) => this.equipmentSkillFromRow(row));
   }
   private page(document: Row, value: unknown): number | undefined {
     return value === undefined
@@ -489,6 +523,18 @@ export class Workspace {
     type: "repository" | "document",
     value: string,
   ): void {
+    if (
+      type === "document" &&
+      this.all("SELECT sources FROM equipment_skills WHERE projectId=?", projectId)
+        .some((row) =>
+          (JSON.parse(row.sources) as EquipmentSkillSource[]).some(
+            (source) => source.documentId === value,
+          ),
+        )
+    )
+      throw new Error(
+        "This document is a source for an equipment skill draft or accepted skill. Delete the affected equipment skills before deleting the document.",
+      );
     const models = [
       this.system(projectId),
       ...this.all("SELECT body FROM drafts WHERE projectId=?", projectId).map(
@@ -689,6 +735,12 @@ export class Workspace {
       "documents.search",
       "documents.page",
       "documents.delete",
+      "equipmentSkills.list",
+      "equipmentSkills.catalog",
+      "equipmentSkills.propose",
+      "equipmentSkills.accept",
+      "equipmentSkills.delete",
+      "equipmentSkills.export",
       "system.get",
       "system.save",
       "drafts.list",
@@ -1066,6 +1118,85 @@ export class Workspace {
         });
         return { ok: true };
       }
+      case "equipmentSkills.list":
+        return this.equipmentSkills(projectId);
+      case "equipmentSkills.catalog":
+        return args.skillId === undefined
+          ? this.equipmentSkills(projectId).map(({ body, ...metadata }) => metadata)
+          : [this.equipmentSkill(projectId, args.skillId)];
+      case "equipmentSkills.propose":
+        return this.transaction(() => {
+          this.project(projectId);
+          if (
+            Number(this.get(
+              "SELECT count(*) AS count FROM equipment_skills WHERE projectId=?",
+              projectId,
+            )?.count) >= 20
+          )
+            throw new Error(
+              "This project has 20 equipment skills. Delete an existing draft or accepted skill before proposing another.",
+            );
+          const name = string(args.name, "Equipment skill name", 64);
+          if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(name))
+            throw new Error(
+              "Equipment skill name must use lowercase letters, digits, and single hyphens between words.",
+            );
+          const description = string(args.description, "Equipment skill description", 500);
+          const equipment = string(args.equipment, "Equipment", 200);
+          const body = string(args.body, "Equipment skill body", 32_000);
+          const suppliedSources = list(args.sources, "Equipment skill sources", 24);
+          if (!suppliedSources.length)
+            throw new Error("An equipment skill requires at least one document source.");
+          const sources: EquipmentSkillSource[] = suppliedSources.map((raw) => {
+            const source = object(raw, "Equipment skill source");
+            const document = this.document(projectId, source.documentId);
+            if (source.pageStart === undefined || source.pageEnd === undefined)
+              throw new Error("Equipment skill sources require a start and end page.");
+            const pageStart = boundedInteger(
+              source.pageStart, "Source start page", 1, 1, document.pageCount,
+            );
+            const pageEnd = boundedInteger(
+              source.pageEnd, "Source end page", pageStart, pageStart, document.pageCount,
+            );
+            return {
+              documentId: document.id,
+              name: document.name,
+              sha256: document.sha256,
+              pageStart,
+              pageEnd,
+            };
+          });
+          const now = new Date().toISOString();
+          const skill: EquipmentSkill = {
+            id: randomUUID(), projectId, name, description, equipment, body,
+            status: "draft", sources, createdAt: now,
+          };
+          this.db.prepare(
+            "INSERT INTO equipment_skills(id,projectId,name,description,equipment,body,status,sources,createdAt) VALUES(?,?,?,?,?,?,?,?,?)",
+          ).run(skill.id, projectId, name, description, equipment, body, skill.status, JSON.stringify(sources), now);
+          this.db.prepare("UPDATE projects SET updatedAt=? WHERE id=?").run(now, projectId);
+          return skill;
+        });
+      case "equipmentSkills.accept":
+        return this.transaction(() => {
+          const skill = this.equipmentSkill(projectId, args.skillId);
+          if (skill.status === "accepted") return skill;
+          const now = new Date().toISOString();
+          this.db.prepare(
+            "UPDATE equipment_skills SET status='accepted',acceptedAt=? WHERE id=? AND projectId=?",
+          ).run(now, skill.id, projectId);
+          this.db.prepare("UPDATE projects SET updatedAt=? WHERE id=?").run(now, projectId);
+          return { ...skill, status: "accepted", acceptedAt: now } satisfies EquipmentSkill;
+        });
+      case "equipmentSkills.delete":
+        return this.transaction(() => {
+          const skill = this.equipmentSkill(projectId, args.skillId);
+          this.db.prepare("DELETE FROM equipment_skills WHERE id=? AND projectId=?").run(skill.id, projectId);
+          this.db.prepare("UPDATE projects SET updatedAt=? WHERE id=?").run(new Date().toISOString(), projectId);
+          return { ok: true };
+        });
+      case "equipmentSkills.export":
+        return exportEquipmentSkill(this.equipmentSkill(projectId, args.skillId));
       case "system.get":
         return this.system(projectId);
       case "system.save":
