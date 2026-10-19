@@ -58,4 +58,4 @@ For PDF diagrams, the client and model must support image tool results. Text-onl
 
 Hyperbench does not initiate model calls. Tool results go to the agent that requested them; that agent may send them to a cloud model. Model choice, retention settings, shell permissions, and network access remain controlled by the user's agent.
 
-Protocol references: [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk), [OpenAI MCP setup examples](https://developers.openai.com/learn/docs-mcp). These describe integration formats; they are not a claim that every client/version was tested here. See the validation report for actual checks.
+Protocol references: [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk), [OpenAI MCP setup examples](https://developers.openai.com/learn/docs-mcp). These describe integration formats; they are not a claim that every client/version was tested here.

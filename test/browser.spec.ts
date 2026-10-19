@@ -1514,8 +1514,11 @@ test("a fresh launch link reconnects an already-open expired session", async ({
 }) => {
   await page.goto(`${local.url.split("#")[0]}?reconnect#token=expired`);
   await expect(page.getByRole("alert")).toContainText(
-    "Workspace access expired.",
+    "printed by hyperbench start",
   );
+  await expect(
+    page.getByRole("button", { name: "Create project", exact: true }),
+  ).toBeDisabled();
   await page.goto(local.url.replace("/#", "/?reconnect#"));
   await expect(
     page.getByRole("button", { name: "Create project", exact: true }),
@@ -2150,14 +2153,14 @@ test("equipment skills preserve failed reviews, expose provenance and export onl
   await page.getByLabel("Upload documents").setInputFiles({
     name: "device.md",
     mimeType: "text/markdown",
-    buffer: await readFile(path.resolve("examples/equipment-skill/device.md")),
+    buffer: Buffer.from("# Sensor revision B\n\nStatus bit 4 means a sample is ready.\n"),
   });
   await expect(page.locator(".document-sidebar")).toContainText("device.md");
   const document = (await workspace.call("documents.list", { projectId }) as DocumentSummary[])[0];
   await page.getByRole("button", { name: "Equipment skills", exact: true }).click();
   await dialog.getByRole("button", { name: "New skill", exact: true }).click();
   await expect(dialog.getByRole("checkbox", { name: "device.md" })).toBeChecked();
-  await dialog.getByLabel("Equipment and revision").fill("Harbor H2 revision D");
+  await dialog.getByLabel("Equipment and revision").fill("Sensor revision B");
   await page.evaluate(() => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -2171,18 +2174,18 @@ test("equipment skills preserve failed reviews, expose provenance and export onl
   expect(await request.inputValue()).toContain(document.id);
   expect(await request.inputValue()).toContain(document.sha256);
   expect(await request.inputValue()).toContain("propose_equipment_skill");
-  await dialog.getByLabel("Equipment and revision").fill("Harbor H2 revision D, capture 2");
+  await dialog.getByLabel("Equipment and revision").fill("Sensor revision B, capture 2");
   await expect(request).toHaveCount(0);
-  const body = "# Harbor H2\n\nUse the revision D status mask (device.md, page 1).\n\n<script>window.skillExecuted = true</script>\n\nUntested on hardware.";
+  const body = "# Sensor\n\nUse the revision B status mask (device.md, page 1).\n\n<script>window.skillExecuted = true</script>\n\nUntested on hardware.";
   const skill = await workspace.call("equipmentSkills.propose", {
     projectId,
-    name: "harbor-h2-debugging",
-    equipment: "Harbor H2 revision D",
+    name: "sensor-debugging",
+    equipment: "Sensor revision B",
     description: "Investigate unusable samples with the revision-matched status decoder.",
     body,
     sources: [{ documentId: document.id, pageStart: 1, pageEnd: 1 }],
   }) as EquipmentSkill;
-  await dialog.getByRole("button", { name: /harbor-h2-debugging/ }).click();
+  await dialog.getByRole("button", { name: /sensor-debugging/ }).click();
   await expect(dialog.getByLabel("Skill Markdown")).toContainText("<script>");
   expect(await page.evaluate(() => (window as any).skillExecuted)).toBeUndefined();
   await expect(dialog.getByRole("button", { name: "Download SKILL.md" })).toHaveCount(0);
@@ -2209,17 +2212,17 @@ test("equipment skills preserve failed reviews, expose provenance and export onl
   const exported = await readFile((await download.path())!, "utf8");
   expect(exported).toContain(body);
   expect(exported).toContain(document.sha256);
-  expect(exported).toContain('name: "harbor-h2-debugging"');
+  expect(exported).toContain('name: "sensor-debugging"');
   await page.reload();
   await page.getByRole("button", { name: /^Documents/ }).click();
   await page.getByRole("button", { name: "Equipment skills", exact: true }).click();
-  await dialog.getByRole("button", { name: /harbor-h2-debugging/ }).click();
+  await dialog.getByRole("button", { name: /sensor-debugging/ }).click();
   await expect(dialog.getByText("Accepted", { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   page.once("dialog", confirmation => confirmation.accept());
   await dialog.getByRole("button", { name: "Remove skill", exact: true }).click();
-  await expect(dialog.getByRole("button", { name: /harbor-h2-debugging/ })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: /sensor-debugging/ })).toHaveCount(0);
   expect(await workspace.call("equipmentSkills.list", { projectId })).toEqual([]);
   expect(skill.sources[0].sha256).toBe(document.sha256);
 });
